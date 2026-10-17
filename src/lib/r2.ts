@@ -3,8 +3,10 @@ import {
   AlbumSummary,
   DEFAULT_PUBLIC_CONFIG,
   PublicSiteConfig,
+  clampBrightness,
   isAlbumVisible,
 } from "./types";
+import { validFontKey } from "./fonts";
 
 export const PUBLIC_CONFIG_KEY = "site_config_public.json";
 /** This site's own album index in the shared bucket. The family site uses albums.json. */
@@ -25,6 +27,7 @@ export async function getPublicSiteConfig(): Promise<PublicSiteConfig> {
     });
     if (!res.ok) return DEFAULT_PUBLIC_CONFIG;
     const raw = await res.json();
+    const dedupedCategories = dedupeCategories(raw?.categories);
     return {
       ...DEFAULT_PUBLIC_CONFIG,
       ...raw,
@@ -35,10 +38,46 @@ export async function getPublicSiteConfig(): Promise<PublicSiteConfig> {
         typeof raw?.latest_count === "number" && raw.latest_count > 0
           ? Math.floor(raw.latest_count)
           : DEFAULT_PUBLIC_CONFIG.latest_count,
+      categories: dedupedCategories,
+      splash_brightness: clampBrightness(
+        raw?.splash_brightness,
+        DEFAULT_PUBLIC_CONFIG.splash_brightness
+      ),
+      mosaic_brightness: clampBrightness(
+        raw?.mosaic_brightness,
+        DEFAULT_PUBLIC_CONFIG.mosaic_brightness
+      ),
+      album_backdrop_brightness: clampBrightness(
+        raw?.album_backdrop_brightness,
+        DEFAULT_PUBLIC_CONFIG.album_backdrop_brightness
+      ),
+      font_brand: validFontKey(raw?.font_brand),
+      font_badge: validFontKey(raw?.font_badge),
+      font_headline: validFontKey(raw?.font_headline),
+      font_description: validFontKey(raw?.font_description),
+      font_ui: validFontKey(raw?.font_ui),
     };
   } catch {
     return DEFAULT_PUBLIC_CONFIG;
   }
+}
+
+/** Trim, drop empties, and dedupe category names case-insensitively,
+ *  preserving the first-seen casing and order. */
+export function dedupeCategories(input: unknown): string[] {
+  if (!Array.isArray(input)) return [...DEFAULT_PUBLIC_CONFIG.categories];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of input) {
+    const name = String(c || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
 }
 
 /** Fetch this site's album index (newest first), filtered to public-visible categories. */
@@ -59,22 +98,30 @@ export async function getVisibleAlbums(): Promise<AlbumSummary[]> {
   }
 }
 
-/** All distinct categories present in this site's album index (for the admin picker). */
+/** Union of the config's canonical categories and categories discovered
+ *  from this site's album index (deduped, case-insensitive). Used by the
+ *  admin category picker and visibility toggles. */
 export async function getAllAlbumCategories(): Promise<string[]> {
+  const config = await getPublicSiteConfig();
+  const fromConfig = dedupeCategories(config.categories);
+  const discovered: string[] = [];
   const baseUrl = getPublicBaseUrl();
-  if (!baseUrl) return [];
-  try {
-    const res = await fetch(`${baseUrl}/${PUBLIC_ALBUMS_KEY}`, { cache: "no-store" });
-    if (!res.ok) return [];
-    const albums: AlbumSummary[] = await res.json();
-    const set = new Set<string>();
-    for (const a of albums) {
-      if (a.category && a.category.trim()) set.add(a.category.trim());
+  if (baseUrl) {
+    try {
+      const res = await fetch(`${baseUrl}/${PUBLIC_ALBUMS_KEY}`, { cache: "no-store" });
+      if (res.ok) {
+        const albums: AlbumSummary[] = await res.json();
+        if (Array.isArray(albums)) {
+          for (const a of albums) {
+            if (a.category && a.category.trim()) discovered.push(a.category.trim());
+          }
+        }
+      }
+    } catch {
+      // fall through with config categories only
     }
-    return Array.from(set).sort((x, y) => x.localeCompare(y));
-  } catch {
-    return [];
   }
+  return dedupeCategories([...fromConfig, ...discovered]);
 }
 
 /* ---------------- Server-side R2 writer (admin only) ---------------- */

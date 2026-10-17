@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import JSZip from "jszip";
@@ -28,6 +28,12 @@ import {
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareSheet from "@/components/ShareSheet";
 import ViewerPresenceBadge from "@/components/ViewerPresenceBadge";
+import {
+  DEFAULT_PUBLIC_CONFIG,
+  PublicSiteConfig,
+  clampBrightness,
+} from "@/lib/types";
+import { fontVariableFor } from "@/lib/fonts";
 
 export type MediaType = "image" | "video";
 
@@ -79,6 +85,34 @@ export default function PublicAlbumView() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  // Admin-set site config (drives the album backdrop brightness)
+  const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(DEFAULT_PUBLIC_CONFIG);
+  useEffect(() => {
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+    if (!baseUrl) return;
+    fetch(`${baseUrl}/site_config_public.json`, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (cfg) setSiteConfig({ ...DEFAULT_PUBLIC_CONFIG, ...cfg });
+      })
+      .catch(() => {
+        // keep defaults
+      });
+  }, []);
+
+  // Mosaic backdrop built from this album's own photos
+  const backdropPhotos = useMemo(() => {
+    const list = (album?.photos || [])
+      .map((p) => p.urls?.thumb || p.urls?.display)
+      .filter(Boolean) as string[];
+    if (list.length === 0) return [];
+    let tiles = [...list];
+    while (tiles.length < 18) tiles = [...tiles, ...list];
+    return tiles.slice(0, 18);
+  }, [album]);
+  const backdropOpacity =
+    clampBrightness(siteConfig.album_backdrop_brightness, 25) / 100;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
   // Favorites & Selection State
@@ -655,7 +689,32 @@ export default function PublicAlbumView() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-28 relative select-none">
+    <div
+      className="min-h-screen bg-neutral-950 text-neutral-100 pb-28 relative select-none"
+      style={{ fontFamily: `var(${fontVariableFor(siteConfig.font_ui)})` }}
+    >
+      {/* Mosaic backdrop from this album's photos (admin-set brightness) */}
+      {backdropPhotos.length > 0 && (
+        <div
+          className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+          style={{ opacity: backdropOpacity }}
+          aria-hidden="true"
+        >
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1 p-1 -rotate-1 scale-105 filter saturate-75 contrast-110">
+            {backdropPhotos.map((url, idx) => (
+              <div
+                key={`${url}-${idx}`}
+                className={`rounded-xl overflow-hidden bg-neutral-900 border border-white/5 ${
+                  idx % 3 === 0 ? "aspect-4/3" : idx % 2 === 0 ? "aspect-square" : "aspect-3/4"
+                }`}
+              >
+                <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-t from-neutral-950 via-transparent to-neutral-950/80" />
       <header className="border-b border-neutral-800/80 sticky top-0 z-30 bg-neutral-950/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link
@@ -702,7 +761,7 @@ export default function PublicAlbumView() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 pt-10 space-y-8">
+      <main className="max-w-7xl mx-auto px-6 pt-10 space-y-8 relative z-10">
         <div className="space-y-3">
           {viewerName && (
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-blue-950/60 border border-blue-800/80 text-blue-300">

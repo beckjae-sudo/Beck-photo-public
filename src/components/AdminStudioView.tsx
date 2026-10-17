@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   checkAdminAuth,
@@ -10,8 +10,11 @@ import {
   savePublicSiteConfig,
   deleteAlbum,
   importAlbumsFromFamily,
+  renameCategory,
+  deleteCategory,
 } from "@/app/admin/actions";
 import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
+import { FONT_OPTIONS, fontVariableFor } from "@/lib/fonts";
 import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
 import {
   Lock,
@@ -31,6 +34,9 @@ import {
   Clock,
   Play,
   Download,
+  Pencil,
+  Plus,
+  X,
 } from "lucide-react";
 
 function formatDuration(seconds?: number): string {
@@ -66,6 +72,34 @@ export default function AdminStudioView() {
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
+
+  // Category manager state
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryFormError, setCategoryFormError] = useState("");
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [categoryBusy, setCategoryBusy] = useState(false);
+
+  // Albums per category (for the manager's usage counts)
+  const albumCountByCategory = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of albums) {
+      const key = String(a.category || "").trim().toLowerCase();
+      if (key) m.set(key, (m.get(key) || 0) + 1);
+    }
+    return m;
+  }, [albums]);
+
+  // Categories offered in the Visible toggles: canonical list + anything
+  // discovered on albums (union, case-insensitive).
+  const toggleCategories = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const c of [...siteConfig.categories, ...allCategories]) {
+      const t = String(c || "").trim();
+      if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  }, [siteConfig.categories, allCategories]);
 
   // Album Deletion Confirmation State
   const [albumToDelete, setAlbumToDelete] = useState<any | null>(null);
@@ -440,6 +474,111 @@ export default function AdminStudioView() {
     });
   };
 
+  // ---------- Category manager ----------
+
+  const categoryNameError = (name: string, exclude?: string): string | null => {
+    const trimmed = name.trim();
+    if (!trimmed) return "Category name can't be empty.";
+    const excludeKey = exclude?.trim().toLowerCase();
+    const clash = siteConfig.categories.some((c) => {
+      const key = c.trim().toLowerCase();
+      return key === trimmed.toLowerCase() && key !== excludeKey;
+    });
+    if (clash) return `"${trimmed}" already exists.`;
+    return null;
+  };
+
+  const handleAddCategory = () => {
+    const err = categoryNameError(newCategoryName);
+    if (err) {
+      setCategoryFormError(err);
+      return;
+    }
+    const name = newCategoryName.trim();
+    setSiteConfig((prev) => ({
+      ...prev,
+      categories: [...prev.categories, name],
+      // New categories show immediately on the public site
+      visible_categories: prev.visible_categories.some(
+        (c) => c.trim().toLowerCase() === name.toLowerCase()
+      )
+        ? prev.visible_categories
+        : [...prev.visible_categories, name],
+    }));
+    setNewCategoryName("");
+    setCategoryFormError("");
+  };
+
+  const handleRenameCategory = async () => {
+    if (!editingCategory || categoryBusy) return;
+    const err = categoryNameError(renameValue, editingCategory);
+    if (err) {
+      setCategoryFormError(err);
+      return;
+    }
+    const from = editingCategory;
+    const to = renameValue.trim();
+    const fromKey = from.trim().toLowerCase();
+    setCategoryBusy(true);
+    setCategoryFormError("");
+    try {
+      const res = await renameCategory(from, to);
+      if (!res.success) {
+        setCategoryFormError(res.error || "Rename failed.");
+        return;
+      }
+      // Optimistic local update mirrors the server change (avoids
+      // discarding other unsaved settings edits with a full reload)
+      setSiteConfig((prev) => ({
+        ...prev,
+        categories: prev.categories.map((c) =>
+          c.trim().toLowerCase() === fromKey ? to : c
+        ),
+        visible_categories: prev.visible_categories.map((c) =>
+          c.trim().toLowerCase() === fromKey ? to : c
+        ),
+      }));
+      setAlbums((prev) =>
+        prev.map((a) =>
+          String(a.category || "").trim().toLowerCase() === fromKey
+            ? { ...a, category: to }
+            : a
+        )
+      );
+      setEditingCategory(null);
+      setRenameValue("");
+    } catch (e: any) {
+      setCategoryFormError(e?.message || "Rename failed.");
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
+
+  const handleDeleteCategory = async (cat: string) => {
+    if (categoryBusy) return;
+    setCategoryBusy(true);
+    setCategoryFormError("");
+    try {
+      const res = await deleteCategory(cat);
+      if (!res.success) {
+        setCategoryFormError(res.error || "Delete failed.");
+        return;
+      }
+      const key = cat.trim().toLowerCase();
+      setSiteConfig((prev) => ({
+        ...prev,
+        categories: prev.categories.filter((c) => c.trim().toLowerCase() !== key),
+        visible_categories: prev.visible_categories.filter(
+          (c) => c.trim().toLowerCase() !== key
+        ),
+      }));
+    } catch (e: any) {
+      setCategoryFormError(e?.message || "Delete failed.");
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
+
   if (isAuthenticated === null) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
@@ -553,7 +692,7 @@ export default function AdminStudioView() {
                     className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
                   />
                   <datalist id="pub-category-suggestions">
-                    {allCategories.map((cat) => (
+                    {siteConfig.categories.map((cat) => (
                       <option key={cat} value={cat} />
                     ))}
                   </datalist>
@@ -999,20 +1138,213 @@ export default function AdminStudioView() {
             </div>
 
             <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Background Brightness</h3>
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                Site-wide defaults for the photo backdrops. 0 hides the images, 100 shows them at full brightness.
+              </p>
+              <div className="space-y-4 max-w-md">
+                {[
+                  { key: "splash_brightness", label: "Splash page hero" },
+                  { key: "mosaic_brightness", label: "Main page mosaic" },
+                  { key: "album_backdrop_brightness", label: "Album page backdrop" },
+                ].map(({ key, label }) => (
+                  <div key={key} className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-neutral-300 font-semibold">{label}</label>
+                      <span className="text-xs font-mono text-blue-300">
+                        {siteConfig[key as keyof PublicSiteConfig] as number}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={siteConfig[key as keyof PublicSiteConfig] as number}
+                      onChange={(e) =>
+                        setSiteConfig({ ...siteConfig, [key]: Number(e.target.value) })
+                      }
+                      className="w-full accent-blue-500 cursor-pointer"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Typography</h3>
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                Choose a typeface for each text field. Every option previews in
+                its own font.
+              </p>
+              <div className="space-y-3 max-w-md">
+                {[
+                  { key: "font_brand", label: "Brand label (BECK/PHOTO)" },
+                  { key: "font_badge", label: "Badge text" },
+                  { key: "font_headline", label: "Hero headline" },
+                  { key: "font_description", label: "Hero description" },
+                  { key: "font_ui", label: "Everything else" },
+                ].map(({ key, label }) => {
+                  const current = siteConfig[key as keyof PublicSiteConfig] as string;
+                  return (
+                    <div key={key} className="space-y-1.5">
+                      <label className="text-xs text-neutral-300 font-semibold block">
+                        {label}
+                      </label>
+                      <select
+                        value={current}
+                        onChange={(e) =>
+                          setSiteConfig({ ...siteConfig, [key]: e.target.value })
+                        }
+                        style={{ fontFamily: `var(${fontVariableFor(current)})` }}
+                        className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm text-white focus:outline-none focus:border-neutral-600 cursor-pointer"
+                      >
+                        {FONT_OPTIONS.map((opt) => (
+                          <option
+                            key={opt.key}
+                            value={opt.key}
+                            style={{ fontFamily: `var(${opt.variable})` }}
+                          >
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Category Manager</h3>
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                The canonical category list used by the upload form. Renaming a
+                category updates every album using it; a category can only be
+                deleted when no albums use it.
+              </p>
+              {categoryFormError && (
+                <p className="text-xs text-red-400 flex items-center gap-1.5">
+                  <AlertTriangle size={13} /> {categoryFormError}
+                </p>
+              )}
+              <div className="space-y-2">
+                {siteConfig.categories.map((cat) => {
+                  const count = albumCountByCategory.get(cat.trim().toLowerCase()) || 0;
+                  const isEditing = editingCategory === cat;
+                  return (
+                    <div
+                      key={cat}
+                      className="flex items-center gap-2 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg"
+                    >
+                      {isEditing ? (
+                        <>
+                          <input
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleRenameCategory();
+                              if (e.key === "Escape") {
+                                setEditingCategory(null);
+                                setCategoryFormError("");
+                              }
+                            }}
+                            disabled={categoryBusy}
+                            autoFocus
+                            className="flex-1 min-w-0 px-2 py-1.5 bg-neutral-900 border border-neutral-700 rounded-md text-sm text-white focus:outline-none focus:border-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleRenameCategory}
+                            disabled={categoryBusy}
+                            title="Save new name"
+                            className="p-2 rounded-md text-emerald-400 hover:bg-neutral-800 transition cursor-pointer disabled:opacity-50"
+                          >
+                            <CheckCircle2 size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCategory(null);
+                              setCategoryFormError("");
+                            }}
+                            title="Cancel"
+                            className="p-2 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-white transition cursor-pointer"
+                          >
+                            <X size={15} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex-1 min-w-0 text-sm text-white truncate">{cat}</span>
+                          <span className="text-[11px] font-mono text-neutral-500 shrink-0">
+                            {count} {count === 1 ? "album" : "albums"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCategory(cat);
+                              setRenameValue(cat);
+                              setCategoryFormError("");
+                            }}
+                            title={`Rename "${cat}"`}
+                            className="p-2 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-white transition cursor-pointer"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          {count === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCategory(cat)}
+                              disabled={categoryBusy}
+                              title={`Delete "${cat}"`}
+                              className="p-2 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-red-400 transition cursor-pointer disabled:opacity-50"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddCategory();
+                  }}
+                  placeholder="New category name"
+                  className="flex-1 min-w-0 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCategory}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[44px] rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition cursor-pointer shrink-0"
+                >
+                  <Plus size={15} /> Add
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Visible Categories</h3>
               <p className="text-[11px] text-neutral-500 leading-relaxed">
                 Only albums in the checked categories appear on this public site. Albums in
                 any other category stay private to this site&apos;s admin — this is how
                 family-only albums are kept off the public gallery.
               </p>
-              {allCategories.length === 0 ? (
+              {toggleCategories.length === 0 ? (
                 <p className="text-xs text-neutral-500">
-                  No categories discovered yet — publish an album first, then choose which
-                  categories to make public here.
+                  No categories yet — add one in the Category Manager below, or
+                  publish an album first.
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  {allCategories.map((cat) => {
+                  {toggleCategories.map((cat) => {
                     const checked = siteConfig.visible_categories.some(
                       (c) => c.toLowerCase() === cat.toLowerCase()
                     );

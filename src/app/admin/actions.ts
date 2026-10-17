@@ -1,35 +1,16 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import {
-  DEFAULT_PUBLIC_CONFIG,
-  PublicSiteConfig,
-} from "@/lib/types";
-import { PUBLIC_CONFIG_KEY, getPublicSiteConfig, getAllAlbumCategories } from "@/lib/r2";
-
-/** Config + discovered categories for the admin editor. Auth required. */
-export async function getAdminData(): Promise<{
-  success: boolean;
-  config?: PublicSiteConfig;
-  allCategories?: string[];
-  error?: string;
-}> {
-  const isAuth = await checkAdminAuth();
-  if (!isAuth) return { success: false, error: "Unauthorized" };
-  try {
-    const [config, allCategories] = await Promise.all([
-      getPublicSiteConfig(),
-      getAllAlbumCategories(),
-    ]);
-    return { success: true, config, allCategories };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
+import { PUBLIC_CONFIG_KEY } from "@/lib/r2";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
@@ -145,5 +126,246 @@ export async function savePublicSiteConfig(
       success: false,
       error: err instanceof Error ? err.message : String(err),
     };
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Upload pipeline (ported from the original site, retargeted to albums_public.json)
+// ---------------------------------------------------------------------------
+const BUCKET_NAME = process.env.R2_BUCKET_NAME || "";
+
+export async function getDirectUploadUrl(
+  key: string,
+  contentType: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Admin session expired. Please log in again." };
+
+    if (!BUCKET_NAME) return { success: false, error: "R2_BUCKET_NAME is not set in Vercel." };
+
+    const r2 = getR2WriteClient();
+    const command = new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      ContentType: contentType,
+    });
+
+    const url = await getSignedUrl(r2, command, { expiresIn: 3600 });
+
+    // Validate generated signed URL
+    try {
+      new URL(url);
+    } catch {
+      return { success: false, error: `Generated signed URL is invalid: "${url}"` };
+    }
+
+    return { success: true, url };
+  } catch (err: any) {
+    return { success: false, error: `getDirectUploadUrl error: ${err?.message || String(err)}` };
+  }
+}
+
+export async function createAlbum(albumData: {
+  album_id: string;
+  title: string;
+  date: string;
+  category?: string;
+  photos: any[];
+  cover_url: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Admin session expired. Please log in again." };
+
+    const r2 = getR2WriteClient();
+
+    // 1. Save album manifest
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: `${albumData.album_id}/manifest.json`,
+        Body: JSON.stringify(albumData, null, 2),
+        ContentType: "application/json",
+      })
+    );
+
+    // 2. Update global albums index
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+    let albums: any[] = [];
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/albums_public.json`, { cache: "no-store" });
+        if (res.ok) albums = await res.json();
+      } catch {
+        albums = [];
+      }
+    }
+
+    const newSummary = {
+      id: albumData.album_id,
+      title: albumData.title,
+      date: albumData.date,
+      category: albumData.category || "School Sports",
+      photo_count: albumData.photos.length,
+      cover_url: albumData.cover_url,
+    };
+
+    const updatedAlbums = [newSummary, ...albums.filter((a) => a.id !== albumData.album_id)];
+
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: "albums_public.json",
+        Body: JSON.stringify(updatedAlbums, null, 2),
+        ContentType: "application/json",
+      })
+    );
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function updateExistingAlbum(albumData: {
+  album_id: string;
+  title: string;
+  date: string;
+  category?: string;
+  photos: any[];
+  cover_url: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Admin session expired." };
+
+    const r2 = getR2WriteClient();
+
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: `${albumData.album_id}/manifest.json`,
+        Body: JSON.stringify(albumData, null, 2),
+        ContentType: "application/json",
+      })
+    );
+
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.trim().replace(/\/$/, "");
+    let albums: any[] = [];
+    if (baseUrl && baseUrl.startsWith("http")) {
+      try {
+        const res = await fetch(`${baseUrl}/albums_public.json`, { cache: "no-store" });
+        if (res.ok) albums = await res.json();
+      } catch {
+        albums = [];
+      }
+    }
+
+    const updatedAlbums = albums.map((a) => {
+      if (a.id === albumData.album_id) {
+        return {
+          ...a,
+          title: albumData.title,
+          date: albumData.date,
+          category: albumData.category || "School Sports",
+          photo_count: albumData.photos.length,
+          cover_url: albumData.cover_url,
+        };
+      }
+      return a;
+    });
+
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: "albums_public.json",
+        Body: JSON.stringify(updatedAlbums, null, 2),
+        ContentType: "application/json",
+      })
+    );
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function deletePhotoFromR2(keys: string[]): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+    if (keys.length === 0) return { success: true };
+
+    const r2 = getR2WriteClient();
+    await r2.send(
+      new DeleteObjectsCommand({
+        Bucket: BUCKET_NAME,
+        Delete: {
+          Objects: keys.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      })
+    );
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function deleteAlbum(albumId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+
+    if (!BUCKET_NAME) return { success: false, error: "R2_BUCKET_NAME is not set." };
+
+    const r2 = getR2WriteClient();
+
+    // 1. Fetch current albums_public.json
+    let albums: any[] = [];
+    try {
+      const indexObj = await r2.send(
+        new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: "albums_public.json",
+        })
+      );
+      const str = await indexObj.Body?.transformToString();
+      if (str) albums = JSON.parse(str);
+    } catch {
+      // albums_public.json may be missing or empty
+    }
+
+    // 2. Filter out the deleted album
+    const updatedAlbums = albums.filter((a: any) => a.id !== albumId);
+
+    // 3. Save updated albums_public.json back to R2
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: "albums_public.json",
+        Body: JSON.stringify(updatedAlbums, null, 2),
+        ContentType: "application/json",
+      })
+    );
+
+    // 4. Delete the album's manifest.json
+    try {
+      await r2.send(
+        new DeleteObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: `${albumId}/manifest.json`,
+        })
+      );
+    } catch (e) {
+      console.warn("Could not delete manifest.json:", e);
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
   }
 }

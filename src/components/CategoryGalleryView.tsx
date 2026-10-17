@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Folder, Calendar, Layers, Coffee, Share2 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
-import ShareModal from "@/components/ShareModal";
+import ShareSheet from "@/components/ShareSheet";
 import { shuffleArray, getFocalPointStyle } from "@/lib/imageRandomizer";
 
 export interface AlbumSummary {
@@ -304,11 +304,12 @@ export default function CategoryGalleryView({
         </main>
       </div>
 
-      <ShareModal
+      <ShareSheet
         isOpen={isShareOpen}
         onClose={() => setIsShareOpen(false)}
         albumTitle={`${sportTitle} Archive`}
-        albumId={`category/${sportSlug}`}
+        albumId={sportSlug}
+        sharePath={`/category/${sportSlug}`}
       />
 
       <SupportModal

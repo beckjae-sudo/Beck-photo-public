@@ -7,6 +7,8 @@ import {
 } from "./types";
 
 export const PUBLIC_CONFIG_KEY = "site_config_public.json";
+/** This site's own album index in the shared bucket. The family site uses albums.json. */
+export const PUBLIC_ALBUMS_KEY = "albums_public.json";
 
 /** Public base URL of the shared R2 bucket (e.g. https://pub-....r2.dev). */
 export function getPublicBaseUrl(): string {
@@ -39,13 +41,13 @@ export async function getPublicSiteConfig(): Promise<PublicSiteConfig> {
   }
 }
 
-/** Fetch the shared albums index (newest first), filtered to public-visible categories. */
+/** Fetch this site's album index (newest first), filtered to public-visible categories. */
 export async function getVisibleAlbums(): Promise<AlbumSummary[]> {
   const baseUrl = getPublicBaseUrl();
   if (!baseUrl) return [];
   const config = await getPublicSiteConfig();
   try {
-    const res = await fetch(`${baseUrl}/albums.json`, { cache: "no-store" });
+    const res = await fetch(`${baseUrl}/${PUBLIC_ALBUMS_KEY}`, { cache: "no-store" });
     if (!res.ok) return [];
     const albums: AlbumSummary[] = await res.json();
     if (!Array.isArray(albums)) return [];
@@ -57,12 +59,12 @@ export async function getVisibleAlbums(): Promise<AlbumSummary[]> {
   }
 }
 
-/** All distinct categories present in the shared albums index (for the admin picker). */
+/** All distinct categories present in this site's album index (for the admin picker). */
 export async function getAllAlbumCategories(): Promise<string[]> {
   const baseUrl = getPublicBaseUrl();
   if (!baseUrl) return [];
   try {
-    const res = await fetch(`${baseUrl}/albums.json`, { cache: "no-store" });
+    const res = await fetch(`${baseUrl}/${PUBLIC_ALBUMS_KEY}`, { cache: "no-store" });
     if (!res.ok) return [];
     const albums: AlbumSummary[] = await res.json();
     const set = new Set<string>();

@@ -660,7 +660,7 @@ export default function PublicAlbumView() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition py-2 px-4 rounded-xl shadow-lg shadow-blue-950/40"
+            className="inline-flex items-center gap-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition py-2.5 px-4 min-h-[40px] rounded-xl shadow-lg shadow-blue-950/40"
           >
             <ArrowLeft size={14} /> See more albums
           </Link>
@@ -679,7 +679,7 @@ export default function PublicAlbumView() {
 
             <button
               onClick={handleShare}
-              className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
               title="Share this album"
             >
               <Share2 size={12} className="text-blue-400" />
@@ -688,7 +688,7 @@ export default function PublicAlbumView() {
 
             <button
               onClick={() => openSupport("gear")}
-              className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
               title="Sideline Support &amp; Gear Funds"
             >
               <Coffee size={12} className="text-amber-400" />
@@ -778,7 +778,7 @@ export default function PublicAlbumView() {
                 <button
                   type="button"
                   onClick={(e) => toggleFavorite(e, photo.id)}
-                  className={`absolute top-2 left-2 p-2 rounded-full backdrop-blur-md transition-all duration-200 z-10 cursor-pointer ${
+                  className={`absolute top-2 left-2 p-2.5 rounded-full backdrop-blur-md transition-all duration-200 z-10 cursor-pointer ${
                     isFav
                       ? "bg-pink-600 text-white shadow-lg shadow-pink-950/50 opacity-100 scale-100"
                       : "bg-black/60 text-white/70 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
@@ -859,12 +859,13 @@ export default function PublicAlbumView() {
                 <button
                   type="button"
                   onClick={(e) => toggleFavorite(e, selectedPhoto.id)}
-                  className={`p-1.5 rounded-lg backdrop-blur-md transition cursor-pointer ${
+                  className={`p-2.5 rounded-lg backdrop-blur-md transition cursor-pointer ${
                     selectedIds.has(selectedPhoto.id)
                       ? "bg-pink-600 text-white"
                       : "bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white"
                   }`}
                   title="Favorite / Add to selection"
+                  aria-label="Add photo to download selection"
                 >
                   <Heart size={16} fill={selectedIds.has(selectedPhoto.id) ? "currentColor" : "none"} />
                 </button>
@@ -875,7 +876,7 @@ export default function PublicAlbumView() {
                     e.stopPropagation();
                     enterFullscreen();
                   }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-950/40 transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-950/40 transition cursor-pointer"
                   title="Full Screen View"
                 >
                   <Maximize2 size={13} />
@@ -892,7 +893,7 @@ export default function PublicAlbumView() {
                       selectedPhoto.type === "video"
                     )
                   }
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
                 >
                   <Download size={13} />
                   <span className="hidden sm:inline">Download</span>
@@ -903,7 +904,8 @@ export default function PublicAlbumView() {
                     e.stopPropagation();
                     exitLightbox();
                   }}
-                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition cursor-pointer"
+                  className="p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white backdrop-blur-md transition cursor-pointer"
+                  aria-label="Close photo viewer"
                 >
                   <X size={18} />
                 </button>

@@ -26,7 +26,8 @@ import {
   Play,
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
-import ShareModal from "@/components/ShareModal";
+import ShareSheet from "@/components/ShareSheet";
+import ViewerPresenceBadge from "@/components/ViewerPresenceBadge";
 
 export type MediaType = "image" | "video";
 
@@ -659,9 +660,9 @@ export default function PublicAlbumView() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition"
+            className="inline-flex items-center gap-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition py-2 px-4 rounded-xl shadow-lg shadow-blue-950/40"
           >
-            <ArrowLeft size={14} /> Back to Galleries
+            <ArrowLeft size={14} /> See more albums
           </Link>
 
           <div className="flex items-center gap-2.5">
@@ -740,6 +741,10 @@ export default function PublicAlbumView() {
             </div>
 
           </div>
+        </div>
+
+        <div className="max-w-7xl mx-auto px-6">
+          <ViewerPresenceBadge albumId={albumId} />
         </div>
 
         {/* Dynamic Masonry Grid (Photos + Video Posters) */}
@@ -1122,7 +1127,7 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      <ShareModal
+      <ShareSheet
         isOpen={isShareOpen}
         onClose={() => setIsShareOpen(false)}
         albumTitle={album.title}

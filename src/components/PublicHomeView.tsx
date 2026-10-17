@@ -5,7 +5,8 @@ import Link from "next/link";
 import { ArrowRight, Coffee, LayoutGrid } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import AlbumCard from "@/components/AlbumCard";
-import { AlbumSummary, PublicSiteConfig, categorySlug } from "@/lib/types";
+import { AlbumSummary, PublicSiteConfig, categorySlug, clampBrightness } from "@/lib/types";
+import { fontVariableFor } from "@/lib/fonts";
 import { shuffleArray, getFocalPointStyle } from "@/lib/imageRandomizer";
 
 const INSTAGRAM_HANDLE = "shot.by.jaden2";
@@ -53,6 +54,14 @@ export default function PublicHomeView({
   const [currentCoverIndex, setCurrentCoverIndex] = useState(0);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportFund, setSupportFund] = useState<FundType>("gear");
+
+  // Admin-set site-wide background brightness (0-100), from site config.
+  const splashOpacity = clampBrightness(config.splash_brightness, 80) / 100;
+  const mosaicOpacity = clampBrightness(config.mosaic_brightness, 40) / 100;
+
+  // Admin-set per-field typefaces (fall back to Geist on unknown keys)
+  const ff = (key: unknown) => ({ fontFamily: `var(${fontVariableFor(key)})` });
+  const uiFont = ff(config.font_ui);
 
   const openSupport = (fund: FundType = "gear") => {
     setSupportFund(fund);
@@ -145,7 +154,10 @@ export default function PublicHomeView({
   const albumCountFor = (cat: string) => albumCounts.get(cat.toLowerCase()) || 0;
 
   return (
-    <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
+    <div
+      className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none"
+      style={uiFont}
+    >
       {/* ----------------- SPLASH SCREEN ----------------- */}
       {showSplash && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-between p-8 md:p-14 bg-black overflow-hidden">
@@ -154,7 +166,7 @@ export default function PublicHomeView({
               <div
                 key={`${item.url}-${idx}`}
                 className="absolute inset-0 transition-opacity duration-1000 ease-in-out pointer-events-none"
-                style={{ opacity: idx === currentCoverIndex ? 0.8 : 0 }}
+                style={{ opacity: idx === currentCoverIndex ? splashOpacity : 0 }}
               >
                 <img
                   src={item.url}
@@ -185,7 +197,10 @@ export default function PublicHomeView({
           {/* Center brand */}
           <div className="relative z-10 text-center space-y-7 max-w-3xl mx-auto flex flex-col items-center">
             <div className="space-y-3">
-              <h1 className="text-5xl sm:text-7xl md:text-8xl font-black uppercase tracking-[-0.07em] text-white flex items-center justify-center gap-2 drop-shadow-2xl">
+              <h1
+                className="text-5xl sm:text-7xl md:text-8xl font-black uppercase tracking-[-0.07em] text-white flex items-center justify-center gap-2 drop-shadow-2xl"
+                style={ff(config.font_brand)}
+              >
                 <span className="bg-clip-text text-transparent bg-gradient-to-b from-white via-neutral-100 to-neutral-300">
                   BECK
                 </span>
@@ -196,7 +211,10 @@ export default function PublicHomeView({
                   PHOTO
                 </span>
               </h1>
-              <p className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-200 font-mono font-medium drop-shadow-md">
+              <p
+                className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-200 font-mono font-medium drop-shadow-md"
+                style={ff(config.font_badge)}
+              >
                 {config.badge_text || "Action & High-Resolution Athletics"}
               </p>
             </div>
@@ -232,10 +250,16 @@ export default function PublicHomeView({
       )}
 
       {/* ----------------- DIRECTORY VIEW ----------------- */}
-      <div className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden">
+      <div
+        className="min-h-screen bg-neutral-950 relative flex flex-col justify-between overflow-hidden"
+        style={uiFont}
+      >
         {/* Mosaic backdrop */}
         {mosaicPhotos.length > 0 && (
-          <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-30">
+          <div
+            className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+            style={{ opacity: mosaicOpacity }}
+          >
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1 sm:gap-1.5 p-1 -rotate-1 scale-105 filter saturate-75 contrast-110">
               {mosaicPhotos.map((item, idx) => (
                 <div
@@ -267,6 +291,7 @@ export default function PublicHomeView({
                 className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
                 title="Return to Splash Screen"
                 aria-label="Return to splash screen"
+                style={ff(config.font_brand)}
               >
                 <span>BECK</span>
                 <span className="text-blue-500 font-light">/</span>
@@ -305,13 +330,22 @@ export default function PublicHomeView({
           <main className="relative max-w-7xl mx-auto px-6 pt-10 pb-16 space-y-12 w-full">
             {/* Hero */}
             <div className="text-center space-y-4 max-w-3xl mx-auto">
-              <p className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-400 font-mono">
+              <p
+                className="text-[11px] sm:text-xs uppercase tracking-[0.45em] text-neutral-400 font-mono"
+                style={ff(config.font_badge)}
+              >
                 {config.badge_text}
               </p>
-              <h1 className="text-4xl sm:text-5xl md:text-6xl font-black uppercase tracking-tight text-white">
+              <h1
+                className="text-4xl sm:text-5xl md:text-6xl font-black uppercase tracking-tight text-white"
+                style={ff(config.font_headline)}
+              >
                 {config.hero_headline}
               </h1>
-              <p className="text-sm sm:text-base text-neutral-400 max-w-xl mx-auto">
+              <p
+                className="text-sm sm:text-base text-neutral-400 max-w-xl mx-auto"
+                style={ff(config.font_description)}
+              >
                 {config.hero_description}
               </p>
             </div>

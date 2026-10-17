@@ -23,12 +23,14 @@ interface CategoryGalleryViewProps {
   sportSlug: string;
   sportTitle: string;
   albums: AlbumSummary[];
+  fontUiVar?: string;
 }
 
 export default function CategoryGalleryView({
   sportSlug,
   sportTitle,
   albums,
+  fontUiVar,
 }: CategoryGalleryViewProps) {
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>("All");
   const [isSupportOpen, setIsSupportOpen] = useState(false);
@@ -102,7 +104,10 @@ export default function CategoryGalleryView({
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none overflow-hidden">
+    <div
+      className="min-h-screen bg-neutral-950 text-neutral-100 pb-20 relative select-none overflow-hidden"
+      style={fontUiVar ? { fontFamily: `var(${fontUiVar})` } : undefined}
+    >
       {/* Tight-Gap Sport Mosaic Backdrop */}
       {sportMosaicPhotos.length > 0 && (
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-30 select-none">

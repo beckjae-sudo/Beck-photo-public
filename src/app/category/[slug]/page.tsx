@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import CategoryGalleryView, { AlbumSummary } from "@/components/CategoryGalleryView";
 import { getPublicSiteConfig, getVisibleAlbums, getPublicBaseUrl } from "@/lib/r2";
 import { categorySlug } from "@/lib/types";
+import { fontVariableFor } from "@/lib/fonts";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,7 @@ export default async function CategoryPage({
       sportSlug={slug}
       sportTitle={titleForSlug(slug, matched)}
       albums={enrichedAlbums}
+      fontUiVar={fontVariableFor(config.font_ui)}
     />
   );
 }

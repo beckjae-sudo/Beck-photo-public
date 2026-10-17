@@ -9,10 +9,12 @@ import {
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
+import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, clampBrightness } from "@/lib/types";
+import { validFontKey } from "@/lib/fonts";
 import {
   PUBLIC_CONFIG_KEY,
   PUBLIC_ALBUMS_KEY,
+  dedupeCategories,
   getPublicSiteConfig,
   savePublicSiteConfigToR2,
 } from "@/lib/r2";
@@ -102,6 +104,24 @@ function sanitizeConfig(raw: unknown): PublicSiteConfig {
     theme_preset: String(r.theme_preset || DEFAULT_PUBLIC_CONFIG.theme_preset),
     visible_categories: visible,
     latest_count: latest,
+    categories: dedupeCategories(r.categories),
+    splash_brightness: clampBrightness(
+      r.splash_brightness,
+      DEFAULT_PUBLIC_CONFIG.splash_brightness
+    ),
+    mosaic_brightness: clampBrightness(
+      r.mosaic_brightness,
+      DEFAULT_PUBLIC_CONFIG.mosaic_brightness
+    ),
+    album_backdrop_brightness: clampBrightness(
+      r.album_backdrop_brightness,
+      DEFAULT_PUBLIC_CONFIG.album_backdrop_brightness
+    ),
+    font_brand: validFontKey(r.font_brand),
+    font_badge: validFontKey(r.font_badge),
+    font_headline: validFontKey(r.font_headline),
+    font_description: validFontKey(r.font_description),
+    font_ui: validFontKey(r.font_ui),
   };
 }
 
@@ -125,6 +145,153 @@ export async function savePublicSiteConfig(
         ContentType: "application/json",
       })
     );
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Category manager (canonical `categories` list + propagation to albums)
+// ---------------------------------------------------------------------------
+
+/** Read this site's album index via R2. Returns [] when missing/unreadable. */
+async function readPublicAlbumsIndex(r2: S3Client, bucket: string): Promise<any[]> {
+  try {
+    const indexObj = await r2.send(
+      new GetObjectCommand({ Bucket: bucket, Key: PUBLIC_ALBUMS_KEY })
+    );
+    const str = await indexObj.Body?.transformToString();
+    if (str) {
+      const data = JSON.parse(str);
+      if (Array.isArray(data)) return data;
+    }
+  } catch {
+    // albums_public.json may be missing or empty
+  }
+  return [];
+}
+
+async function writePublicAlbumsIndex(
+  r2: S3Client,
+  bucket: string,
+  albums: any[]
+): Promise<void> {
+  await r2.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: PUBLIC_ALBUMS_KEY,
+      Body: JSON.stringify(albums, null, 2),
+      ContentType: "application/json",
+    })
+  );
+}
+
+/** Replace every list entry matching `oldName` (case-insensitive, trimmed)
+ *  with `newName`, preserving position. */
+function replaceCategoryInList(list: string[], oldName: string, newName: string): string[] {
+  const key = oldName.trim().toLowerCase();
+  return list.map((c) => (c.trim().toLowerCase() === key ? newName : c));
+}
+
+/**
+ * Rename a category everywhere: the canonical `categories` list,
+ * `visible_categories`, and every album in albums_public.json whose
+ * category matches (case-insensitive). Names are trimmed; the rename is
+ * rejected when empty or when it would collide with another existing
+ * category (case-insensitive).
+ */
+export async function renameCategory(
+  oldName: string,
+  newName: string
+): Promise<{ success: boolean; renamedAlbums?: number; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, error: "R2_BUCKET_NAME is not set." };
+
+    const from = String(oldName || "").trim();
+    const to = String(newName || "").trim();
+    if (!from) return { success: false, error: "Pick a category to rename." };
+    if (!to) return { success: false, error: "The new name can't be empty." };
+    if (from.toLowerCase() === to.toLowerCase())
+      return { success: false, error: "The new name is the same as the old one." };
+
+    const config = await getPublicSiteConfig();
+    const known = new Set(config.categories.map((c) => c.trim().toLowerCase()));
+    if (!known.has(from.toLowerCase()))
+      return { success: false, error: `"${from}" isn't in the category list.` };
+    if (known.has(to.toLowerCase()))
+      return { success: false, error: `"${to}" already exists as a category.` };
+
+    const r2 = getR2WriteClient();
+    const albums = await readPublicAlbumsIndex(r2, bucket);
+    let renamedAlbums = 0;
+    const updatedAlbums = albums.map((a) => {
+      if (a && String(a.category || "").trim().toLowerCase() === from.toLowerCase()) {
+        renamedAlbums += 1;
+        return { ...a, category: to };
+      }
+      return a;
+    });
+
+    config.categories = replaceCategoryInList(config.categories, from, to);
+    config.visible_categories = replaceCategoryInList(config.visible_categories, from, to);
+
+    await writePublicAlbumsIndex(r2, bucket, updatedAlbums);
+    await savePublicSiteConfigToR2(config);
+
+    return { success: true, renamedAlbums };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Delete a category from the canonical list and `visible_categories`.
+ * Only allowed when no album in albums_public.json uses it
+ * (case-insensitive); otherwise the admin must rename or recategorize first.
+ */
+export async function deleteCategory(
+  name: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, error: "R2_BUCKET_NAME is not set." };
+
+    const target = String(name || "").trim();
+    if (!target) return { success: false, error: "Pick a category to delete." };
+
+    const r2 = getR2WriteClient();
+    const albums = await readPublicAlbumsIndex(r2, bucket);
+    const inUse = albums.some(
+      (a) => a && String(a.category || "").trim().toLowerCase() === target.toLowerCase()
+    );
+    if (inUse)
+      return {
+        success: false,
+        error: `"${target}" is used by albums — rename it or move those albums first.`,
+      };
+
+    const config = await getPublicSiteConfig();
+    const key = target.toLowerCase();
+    config.categories = config.categories.filter((c) => c.trim().toLowerCase() !== key);
+    config.visible_categories = config.visible_categories.filter(
+      (c) => c.trim().toLowerCase() !== key
+    );
+    await savePublicSiteConfigToR2(config);
+
     return { success: true };
   } catch (err) {
     return {
@@ -449,17 +616,27 @@ export async function importAlbumsFromFamily(
       );
     }
 
-    // 3. Auto-add new categories to visible_categories so imports actually appear
+    // 3. Auto-add new categories to visible_categories so imports actually appear,
+    //    and to the canonical categories list so they show in the manager/picker.
     const config = await getPublicSiteConfig();
     const visibleLower = new Set(
       config.visible_categories.map((c) => c.toLowerCase().trim())
     );
+    const canonicalLower = new Set(
+      config.categories.map((c) => c.toLowerCase().trim())
+    );
     let categoriesAdded = false;
     for (const a of toImport) {
       const cat = String(a.category || "").trim();
-      if (cat && !visibleLower.has(cat.toLowerCase())) {
+      if (!cat) continue;
+      if (!visibleLower.has(cat.toLowerCase())) {
         config.visible_categories.push(cat);
         visibleLower.add(cat.toLowerCase());
+        categoriesAdded = true;
+      }
+      if (!canonicalLower.has(cat.toLowerCase())) {
+        config.categories.push(cat);
+        canonicalLower.add(cat.toLowerCase());
         categoriesAdded = true;
       }
     }

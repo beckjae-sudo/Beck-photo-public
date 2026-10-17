@@ -19,6 +19,7 @@ interface ShareSheetProps {
 export default function ShareSheet({ isOpen, onClose, albumTitle, albumId, sharePath }: ShareSheetProps) {
   const [copied, setCopied] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const [qrFailed, setQrFailed] = useState(false);
 
   if (!isOpen) return null;
 
@@ -100,7 +101,7 @@ export default function ShareSheet({ isOpen, onClose, albumTitle, albumId, share
               />
               <button
                 onClick={copyToClipboard}
-                className={`px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                className={`px-4 py-3 min-h-[44px] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
                   copied
                     ? "bg-emerald-600 text-white shadow-lg shadow-emerald-950/40"
                     : "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-950/40"
@@ -144,10 +145,15 @@ export default function ShareSheet({ isOpen, onClose, albumTitle, albumId, share
           </div>
 
           {/* QR code */}
-          {showQR && (
+          {showQR && !qrFailed && (
             <div className="p-4 rounded-xl bg-neutral-900 border border-neutral-800 flex flex-col items-center justify-center gap-2 animate-in fade-in zoom-in-95 duration-200">
               <div className="p-3 bg-white rounded-xl shadow-inner">
-                <img src={qrImageUrl} alt="Album QR Code" className="w-36 h-36 object-contain" />
+                <img
+                  src={qrImageUrl}
+                  alt="Album QR Code"
+                  className="w-36 h-36 object-contain"
+                  onError={() => setQrFailed(true)}
+                />
               </div>
               <span className="text-[10px] text-neutral-400 font-mono">
                 Scan with any smartphone camera to open the album

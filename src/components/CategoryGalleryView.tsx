@@ -147,7 +147,7 @@ export default function CategoryGalleryView({
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsShareOpen(true)}
-                className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+                className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
               >
                 <Share2 size={12} className="text-blue-400" />
                 <span>SHARE</span>
@@ -155,7 +155,7 @@ export default function CategoryGalleryView({
 
               <button
                 onClick={() => openSupport("gear")}
-                className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+                className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
               >
                 <Coffee size={12} className="text-amber-400" />
                 <span className="hidden sm:inline">SUPPORT</span>
@@ -247,7 +247,7 @@ export default function CategoryGalleryView({
               </p>
               <button
                 onClick={() => setSelectedSubCategory("All")}
-                className="mt-3 px-4 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-blue-400 text-xs font-mono transition cursor-pointer"
+                className="mt-3 px-4 py-2.5 min-h-[44px] rounded-lg bg-neutral-900 hover:bg-neutral-800 text-blue-400 text-xs font-mono transition cursor-pointer"
               >
                 View all {sportTitle} albums
               </button>

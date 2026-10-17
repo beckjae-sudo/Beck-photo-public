@@ -10,7 +10,12 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
-import { PUBLIC_CONFIG_KEY } from "@/lib/r2";
+import {
+  PUBLIC_CONFIG_KEY,
+  PUBLIC_ALBUMS_KEY,
+  getPublicSiteConfig,
+  savePublicSiteConfigToR2,
+} from "@/lib/r2";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
@@ -365,6 +370,104 @@ export async function deleteAlbum(albumId: string): Promise<{ success: boolean; 
     }
 
     return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Import albums from the family site (shared bucket, separate album indexes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Import family-site albums into this site's index by album id.
+ * Photo files are shared (identical R2 keys); only the album listing is copied.
+ * Dedups by id, so re-importing is safe. Imported entries keep the family
+ * index's newest-first order. Any imported album whose category is not in the
+ * public config's visible_categories gets its category auto-added so the
+ * imported albums actually appear on the public site.
+ */
+export async function importAlbumsFromFamily(
+  albumIds: string[]
+): Promise<{ success: boolean; imported?: number; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, error: "R2_BUCKET_NAME is not set." };
+
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.trim().replace(/\/$/, "");
+    if (!baseUrl) return { success: false, error: "NEXT_PUBLIC_R2_BASE_URL is not set." };
+
+    const wanted = new Set((albumIds || []).map((id) => String(id)));
+    if (wanted.size === 0) return { success: true, imported: 0 };
+
+    // 1. Family index (public read)
+    let familyAlbums: any[] = [];
+    try {
+      const res = await fetch(`${baseUrl}/albums.json`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) familyAlbums = data;
+      }
+    } catch {
+      // fall through to empty — handled below
+    }
+
+    const r2 = getR2WriteClient();
+
+    // 2. Current public index (via R2, like deleteAlbum)
+    let publicAlbums: any[] = [];
+    try {
+      const indexObj = await r2.send(
+        new GetObjectCommand({ Bucket: bucket, Key: PUBLIC_ALBUMS_KEY })
+      );
+      const str = await indexObj.Body?.transformToString();
+      if (str) {
+        const data = JSON.parse(str);
+        if (Array.isArray(data)) publicAlbums = data;
+      }
+    } catch {
+      // albums_public.json may be missing — start fresh
+    }
+
+    // Keep family-index order (newest first); skip anything already present
+    const existingIds = new Set(publicAlbums.map((a) => String(a?.id)));
+    const toImport = familyAlbums.filter(
+      (a) => a && wanted.has(String(a.id)) && !existingIds.has(String(a.id))
+    );
+
+    if (toImport.length > 0) {
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: PUBLIC_ALBUMS_KEY,
+          Body: JSON.stringify([...toImport, ...publicAlbums], null, 2),
+          ContentType: "application/json",
+        })
+      );
+    }
+
+    // 3. Auto-add new categories to visible_categories so imports actually appear
+    const config = await getPublicSiteConfig();
+    const visibleLower = new Set(
+      config.visible_categories.map((c) => c.toLowerCase().trim())
+    );
+    let categoriesAdded = false;
+    for (const a of toImport) {
+      const cat = String(a.category || "").trim();
+      if (cat && !visibleLower.has(cat.toLowerCase())) {
+        config.visible_categories.push(cat);
+        visibleLower.add(cat.toLowerCase());
+        categoriesAdded = true;
+      }
+    }
+    if (categoriesAdded) {
+      await savePublicSiteConfigToR2(config);
+    }
+
+    return { success: true, imported: toImport.length };
   } catch (err: any) {
     return { success: false, error: err?.message || String(err) };
   }

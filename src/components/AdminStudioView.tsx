@@ -9,6 +9,7 @@ import {
   getDirectUploadUrl,
   savePublicSiteConfig,
   deleteAlbum,
+  importAlbumsFromFamily,
 } from "@/app/admin/actions";
 import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
 import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
@@ -29,6 +30,7 @@ import {
   ChevronRight,
   Clock,
   Play,
+  Download,
 } from "lucide-react";
 
 function formatDuration(seconds?: number): string {
@@ -68,6 +70,15 @@ export default function AdminStudioView() {
   // Album Deletion Confirmation State
   const [albumToDelete, setAlbumToDelete] = useState<any | null>(null);
   const [isDeletingAlbum, setIsDeletingAlbum] = useState(false);
+
+  // Import-from-family-site state
+  const [importCandidates, setImportCandidates] = useState<any[]>([]);
+  const [importListLoaded, setImportListLoaded] = useState(false);
+  const [loadingImportList, setLoadingImportList] = useState(false);
+  const [selectedImportIds, setSelectedImportIds] = useState<Set<string>>(new Set());
+  const [importingAlbums, setImportingAlbums] = useState(false);
+  const [importResult, setImportResult] = useState<number | null>(null);
+  const [importError, setImportError] = useState("");
 
   useEffect(() => {
     checkAdminAuth().then((auth) => {
@@ -124,6 +135,73 @@ export default function AdminStudioView() {
       setAuthError("Incorrect password");
     }
   };
+
+  // --- Import from family site ---
+  async function loadImportCandidates() {
+    setLoadingImportList(true);
+    setImportError("");
+    setImportResult(null);
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+      const [famRes, pubRes] = await Promise.all([
+        fetch(`${baseUrl}/albums.json`, { cache: "no-store" }),
+        fetch(`${baseUrl}/albums_public.json`, { cache: "no-store" }),
+      ]);
+      const family = famRes.ok ? await famRes.json() : [];
+      const pub = pubRes.ok ? await pubRes.json() : [];
+      const pubIds = new Set(
+        (Array.isArray(pub) ? pub : []).map((a: any) => String(a?.id))
+      );
+      const candidates = (Array.isArray(family) ? family : []).filter(
+        (a: any) => a && a.id && !pubIds.has(String(a.id))
+      );
+      setImportCandidates(candidates);
+      // Pre-select everything — the common case is "bring it all over"
+      setSelectedImportIds(new Set(candidates.map((a: any) => String(a.id))));
+      setImportListLoaded(true);
+    } catch (e) {
+      console.error("Error loading family albums:", e);
+      setImportError("Could not load the family album list. Please try again.");
+    } finally {
+      setLoadingImportList(false);
+    }
+  }
+
+  function toggleImportId(id: string) {
+    setSelectedImportIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function setAllImportSelected(selectAll: boolean) {
+    setSelectedImportIds(
+      selectAll
+        ? new Set(importCandidates.map((a: any) => String(a.id)))
+        : new Set()
+    );
+  }
+
+  async function handleImportSelected() {
+    if (selectedImportIds.size === 0 || importingAlbums) return;
+    setImportingAlbums(true);
+    setImportError("");
+    setImportResult(null);
+    try {
+      const res = await importAlbumsFromFamily([...selectedImportIds]);
+      if (!res.success) throw new Error(res.error || "Import failed");
+      setImportResult(res.imported ?? 0);
+      setSelectedImportIds(new Set());
+      await loadData(); // refresh live albums + categories
+      await loadImportCandidates(); // refresh the diff
+    } catch (e: any) {
+      setImportError(e?.message || "Import failed. Please try again.");
+    } finally {
+      setImportingAlbums(false);
+    }
+  }
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -659,6 +737,137 @@ export default function AdminStudioView() {
                   {isUploading ? "Uploading..." : "Publish Album"}
                 </button>
               </div>
+            </section>
+
+            <section className="bg-neutral-900/50 border border-neutral-800/80 rounded-2xl p-6 md:p-8 space-y-6">
+              <div className="border-b border-neutral-800 pb-4">
+                <h2 className="text-lg font-bold text-white">Import from Family Site</h2>
+                <p className="text-xs text-neutral-400">
+                  Pull albums straight from the family site — no re-upload needed. Photos stay in the
+                  shared bucket; only the album listing is copied over.
+                </p>
+              </div>
+
+              {importError && (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-950/60 border border-red-800/60 text-red-300 text-xs">
+                  <AlertTriangle size={14} className="shrink-0" /> {importError}
+                </div>
+              )}
+
+              {importResult !== null && (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 text-sm">
+                  <CheckCircle2 size={16} className="shrink-0" />
+                  {importResult > 0
+                    ? `Imported ${importResult} album${importResult === 1 ? "" : "s"} to the public site.`
+                    : "Nothing new to import — those albums are already on the public site."}
+                </div>
+              )}
+
+              {!importListLoaded ? (
+                <button
+                  onClick={loadImportCandidates}
+                  disabled={loadingImportList}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition cursor-pointer"
+                >
+                  {loadingImportList ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
+                  {loadingImportList ? "Loading family albums..." : "Check for albums to import"}
+                </button>
+              ) : importCandidates.length === 0 ? (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <p className="text-xs text-neutral-500">
+                    All family albums are already on the public site.
+                  </p>
+                  <button
+                    onClick={loadImportCandidates}
+                    disabled={loadingImportList}
+                    className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer shrink-0"
+                  >
+                    Check again
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-neutral-400">
+                      {importCandidates.length} album{importCandidates.length === 1 ? "" : "s"} available
+                      • {selectedImportIds.size} selected
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setAllImportSelected(true)}
+                        className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
+                      >
+                        Select all
+                      </button>
+                      <button
+                        onClick={() => setAllImportSelected(false)}
+                        className="text-xs font-semibold text-neutral-400 hover:text-white transition cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                    {importCandidates.map((album: any) => {
+                      const id = String(album.id);
+                      const checked = selectedImportIds.has(id);
+                      return (
+                        <label
+                          key={id}
+                          className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition ${
+                            checked
+                              ? "bg-blue-950/40 border-blue-800/60"
+                              : "bg-neutral-900 border-neutral-800 hover:border-neutral-700"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleImportId(id)}
+                            className="w-5 h-5 accent-blue-600 shrink-0 cursor-pointer"
+                          />
+                          <div className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-950 shrink-0">
+                            {album.cover_url ? (
+                              <img src={album.cover_url} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-neutral-700">
+                                <ImageIcon size={18} />
+                              </div>
+                            )}
+                          </div>
+                          <div className="truncate min-w-0">
+                            <p className="text-xs font-semibold text-white truncate">{album.title}</p>
+                            <p className="text-[11px] text-neutral-400 truncate">
+                              {album.date || "No date"} • {album.category || "Uncategorized"} •{" "}
+                              {album.photo_count ?? 0} items
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={handleImportSelected}
+                    disabled={selectedImportIds.size === 0 || importingAlbums}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition cursor-pointer"
+                  >
+                    {importingAlbums ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Download size={16} />
+                    )}
+                    {importingAlbums
+                      ? "Importing..."
+                      : `Import selected (${selectedImportIds.size})`}
+                  </button>
+                </div>
+              )}
             </section>
 
             <section className="space-y-4">

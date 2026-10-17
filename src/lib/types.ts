@@ -23,7 +23,7 @@ export interface PublicSiteConfig {
   /** Categories (case-insensitive) that may appear on the public site.
    *  Albums in any other category stay off the public site entirely. */
   visible_categories: string[];
-  /** How many of the most recent albums /latest shows. */
+  /** How many of the most recent albums the homepage showcase shows. */
   latest_count: number;
 }
 

@@ -1,7 +1,7 @@
-import AdminPanel from "@/components/AdminPanel";
+import AdminStudioView from "@/components/AdminStudioView";
 
 export const dynamic = "force-dynamic";
 
 export default function AdminPage() {
-  return <AdminPanel />;
+  return <AdminStudioView />;
 }

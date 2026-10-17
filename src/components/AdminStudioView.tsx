@@ -148,14 +148,22 @@ export default function AdminStudioView() {
     setPhotos((prev) => {
       const combined = [...prev, ...processedList];
       combined.sort((a, b) => a.timestamp - b.timestamp);
-
-      if (!coverPhotoUid && combined.length > 0) {
-        setCoverPhotoUid(combined[0].uid);
-      }
       return combined;
     });
     setUploadProgressText("");
-  };
+  }
+
+  // Keep cover selection valid: default to the first photo when the selection
+  // is empty or points at a photo that no longer exists; clear when emptied.
+  useEffect(() => {
+    if (photos.length === 0) {
+      if (coverPhotoUid !== "") setCoverPhotoUid("");
+      return;
+    }
+    if (!photos.some((p) => p.uid === coverPhotoUid)) {
+      setCoverPhotoUid(photos[0].uid);
+    }
+  }, [photos, coverPhotoUid]);;
 
   // Reorder Handlers
   const handleDragStart = (e: React.DragEvent, index: number) => {
@@ -416,7 +424,7 @@ export default function AdminStudioView() {
           <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 p-1 rounded-xl">
             <button
               onClick={() => setActiveTab("albums")}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
                 activeTab === "albums" ? "bg-neutral-800 text-white shadow-sm" : "text-neutral-400 hover:text-white"
               }`}
             >
@@ -424,7 +432,7 @@ export default function AdminStudioView() {
             </button>
             <button
               onClick={() => setActiveTab("settings")}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition ${
                 activeTab === "settings" ? "bg-neutral-800 text-white shadow-sm" : "text-neutral-400 hover:text-white"
               }`}
             >
@@ -578,7 +586,7 @@ export default function AdminStudioView() {
                           <button
                             type="button"
                             onClick={() => setCoverPhotoUid(p.uid)}
-                            className={`absolute top-1.5 left-1.5 p-1 rounded-md backdrop-blur-md transition ${
+                            className={`absolute top-1.5 left-1.5 p-2 rounded-md backdrop-blur-md transition ${
                               isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
                             }`}
                             title="Set as Cover"
@@ -589,21 +597,21 @@ export default function AdminStudioView() {
                           <button
                             type="button"
                             onClick={() => setPhotos(photos.filter((x) => x.uid !== p.uid))}
-                            className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md opacity-0 group-hover:opacity-100 transition"
+                            className="absolute top-1.5 right-1.5 p-2 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md sm:opacity-0 sm:group-hover:opacity-100 transition"
                             title="Remove"
                           >
                             <Trash2 size={11} />
                           </button>
 
                           {/* Center Drag Handle Visual Indicator */}
-                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                          <div className="absolute inset-0 flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition pointer-events-none">
                             <span className="p-1 rounded-md bg-black/70 text-white backdrop-blur-sm shadow-md">
                               <GripVertical size={14} />
                             </span>
                           </div>
 
                           {/* Bottom Quick Nudge Arrows */}
-                          <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                          <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition">
                             <button
                               type="button"
                               disabled={idx === 0}
@@ -611,7 +619,7 @@ export default function AdminStudioView() {
                                 e.stopPropagation();
                                 movePhotoStep(idx, "left");
                               }}
-                              className="p-1 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
+                              className="p-1.5 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
                               title="Move media earlier in sequence"
                             >
                               <ChevronLeft size={12} />
@@ -623,7 +631,7 @@ export default function AdminStudioView() {
                                 e.stopPropagation();
                                 movePhotoStep(idx, "right");
                               }}
-                              className="p-1 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
+                              className="p-1.5 rounded bg-black/70 hover:bg-neutral-800 disabled:opacity-30 text-white transition"
                               title="Move media later in sequence"
                             >
                               <ChevronRight size={12} />
@@ -686,7 +694,7 @@ export default function AdminStudioView() {
                       <div className="flex items-center gap-1.5 shrink-0">
                         <Link
                           href={`/admin/edit/${album.id}`}
-                          className="p-2 text-neutral-400 hover:text-white rounded-lg bg-neutral-800 hover:bg-neutral-700 transition"
+                          className="p-2.5 text-neutral-400 hover:text-white rounded-lg bg-neutral-800 hover:bg-neutral-700 transition"
                           title="Edit Album"
                         >
                           <Edit size={14} />
@@ -694,7 +702,7 @@ export default function AdminStudioView() {
                         <button
                           type="button"
                           onClick={() => setAlbumToDelete(album)}
-                          className="p-2 text-neutral-400 hover:text-red-400 rounded-lg bg-neutral-800 hover:bg-neutral-700 transition cursor-pointer"
+                          className="p-2.5 text-neutral-400 hover:text-red-400 rounded-lg bg-neutral-800 hover:bg-neutral-700 transition cursor-pointer"
                           title="Delete Album"
                         >
                           <Trash2 size={14} />
@@ -804,7 +812,7 @@ export default function AdminStudioView() {
                         key={cat}
                         type="button"
                         onClick={() => toggleVisibleCategory(cat)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition cursor-pointer ${
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold border transition cursor-pointer ${
                           checked
                             ? "bg-blue-950/60 border-blue-700/60 text-blue-200"
                             : "bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-600"

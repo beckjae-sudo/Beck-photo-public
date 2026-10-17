@@ -89,7 +89,7 @@ export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProp
         {/* User's Profile Pill */}
         <button
           onClick={() => setIsEditModalOpen(true)}
-          className="group inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 transition cursor-pointer shadow-sm text-xs"
+          className="group inline-flex items-center gap-2 px-3 py-2 rounded-full bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 transition cursor-pointer shadow-sm text-xs"
           title="Click to change your screen name"
         >
           <span className="flex items-center justify-center w-5 h-5 rounded-full bg-neutral-800 text-[11px] border border-white/10">

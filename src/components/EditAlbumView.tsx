@@ -345,7 +345,7 @@ export default function EditAlbumView() {
             <button
               onClick={handleSaveAllChanges}
               disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-900/30 transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-900/30 transition cursor-pointer"
             >
               {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               {isSaving ? "Saving..." : "Save Changes"}
@@ -415,7 +415,7 @@ export default function EditAlbumView() {
                   )}
                   <button
                     onClick={() => setNewPhotos((prev) => prev.filter((_, i) => i !== idx))}
-                    className="absolute top-1.5 right-1.5 p-1 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition cursor-pointer"
+                    className="absolute top-1.5 right-1.5 p-2 bg-red-600/80 hover:bg-red-600 text-white rounded-md transition cursor-pointer"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -479,7 +479,7 @@ export default function EditAlbumView() {
                   )}
 
                   {/* Hover Grab Indicator */}
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                  <div className="absolute inset-0 flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition pointer-events-none">
                     <span className="p-1 rounded-md bg-black/70 text-white backdrop-blur-sm shadow-md">
                       <GripVertical size={14} />
                     </span>
@@ -493,7 +493,7 @@ export default function EditAlbumView() {
                         e.stopPropagation();
                         setCoverUrl(photo.urls.thumb);
                       }}
-                      className={`p-1.5 rounded-md backdrop-blur-md transition cursor-pointer ${
+                      className={`p-2 rounded-md backdrop-blur-md transition cursor-pointer ${
                         isCover ? "bg-amber-500 text-black" : "bg-black/60 text-neutral-400 hover:text-white"
                       }`}
                       title="Set as cover"
@@ -506,7 +506,7 @@ export default function EditAlbumView() {
                         e.stopPropagation();
                         handleMarkPhotoForDeletion(photo);
                       }}
-                      className="p-1.5 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition cursor-pointer"
+                      className="p-2 rounded-md bg-black/60 text-neutral-400 hover:text-red-400 backdrop-blur-md transition cursor-pointer"
                       title="Delete media"
                     >
                       <Trash2 size={12} />
@@ -514,7 +514,7 @@ export default function EditAlbumView() {
                   </div>
 
                   {/* Bottom-Right Step Nudge Arrows */}
-                  <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition z-10">
+                  <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition z-10">
                     <button
                       type="button"
                       disabled={idx === 0}
@@ -522,7 +522,7 @@ export default function EditAlbumView() {
                         e.stopPropagation();
                         movePhotoStep(idx, "left");
                       }}
-                      className="p-1 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
+                      className="p-1.5 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
                       title="Move media earlier in sequence"
                     >
                       <ChevronLeft size={12} />
@@ -534,7 +534,7 @@ export default function EditAlbumView() {
                         e.stopPropagation();
                         movePhotoStep(idx, "right");
                       }}
-                      className="p-1 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
+                      className="p-1.5 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
                       title="Move media later in sequence"
                     >
                       <ChevronRight size={12} />

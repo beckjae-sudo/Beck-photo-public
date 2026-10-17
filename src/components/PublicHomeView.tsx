@@ -132,8 +132,17 @@ export default function PublicHomeView({
   const latestCount =
     config.latest_count > 0 ? Math.min(50, Math.floor(config.latest_count)) : 3;
   const latestAlbums = albums.slice(0, latestCount);
-  const albumCountFor = (cat: string) =>
-    albums.filter((a) => a.category?.toLowerCase() === cat.toLowerCase()).length;
+
+  // Per-category album counts, memoized (pill bar can hold many categories)
+  const albumCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of albums) {
+      const key = (a.category || "").toLowerCase();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }, [albums]);
+  const albumCountFor = (cat: string) => albumCounts.get(cat.toLowerCase()) || 0;
 
   return (
     <div className="relative min-h-screen bg-black text-neutral-100 overflow-x-hidden select-none">
@@ -149,7 +158,8 @@ export default function PublicHomeView({
               >
                 <img
                   src={item.url}
-                  alt="Gallery Feature"
+                  alt=""
+                  aria-hidden="true"
                   className="w-full h-full object-cover"
                   style={getFocalPointStyle(item.focal_point)}
                   loading={idx === 0 ? "eager" : "lazy"}
@@ -204,7 +214,7 @@ export default function PublicHomeView({
                 href={INSTAGRAM_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/20 hover:border-white/35 text-[11px] text-neutral-200 hover:text-white transition-all duration-300 hover:scale-[1.02] shadow-lg group"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/20 hover:border-white/35 text-[11px] text-neutral-200 hover:text-white transition-all duration-300 hover:scale-[1.02] shadow-lg group"
               >
                 <InstagramIcon size={13} className="text-pink-400 group-hover:scale-110 transition-transform" />
                 <span>
@@ -256,6 +266,7 @@ export default function PublicHomeView({
                 onClick={handleReturnToSplash}
                 className="font-black text-sm tracking-tighter uppercase text-white flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
                 title="Return to Splash Screen"
+                aria-label="Return to splash screen"
               >
                 <span>BECK</span>
                 <span className="text-blue-500 font-light">/</span>
@@ -265,7 +276,7 @@ export default function PublicHomeView({
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => openSupport("gear")}
-                  className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer"
+                  className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer"
                   title="Sideline Support & Gear Funds"
                 >
                   <Coffee size={12} className="text-amber-400" />
@@ -312,12 +323,12 @@ export default function PublicHomeView({
                   <LayoutGrid size={13} />
                   <span>Browse by category</span>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-2 -mx-6 px-6">
+                <div className="flex gap-2 overflow-x-auto pb-2 -mx-6 px-6 no-scrollbar">
                   {categories.map((cat) => (
                     <Link
                       key={cat}
                       href={`/category/${categorySlug(cat)}`}
-                      className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-900/80 border border-neutral-800 hover:border-blue-500/60 hover:bg-neutral-800/90 transition group"
+                      className="shrink-0 flex items-center gap-2 px-4 min-h-[44px] rounded-full bg-neutral-900/80 border border-neutral-800 hover:border-blue-500/60 hover:bg-neutral-800/90 transition group"
                       title={`${albumCountFor(cat)} albums`}
                     >
                       <span className="text-xs font-semibold text-neutral-200 group-hover:text-white uppercase tracking-wider font-mono whitespace-nowrap">

@@ -119,6 +119,26 @@ export default function PublicAlbumView() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const [zipError, setZipError] = useState<string | null>(null);
+  const zipAbortRef = useRef<AbortController | null>(null);
+  const zipTargetsRef = useRef<Photo[]>([]);
+  const [showFullAlbumConfirm, setShowFullAlbumConfirm] = useState(false);
+  const [downloadNote, setDownloadNote] = useState<string | null>(null);
+  const [downloadingSingle, setDownloadingSingle] = useState(false);
+  const [hintDismissed, setHintDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("bpp-select-hint") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const dismissSelectHint = useCallback(() => {
+    setHintDismissed(true);
+    try {
+      localStorage.setItem("bpp-select-hint", "1");
+    } catch {}
+  }, []);
 
   // Fullscreen, Drag, Pan & Pinch Zoom State
   const [isImmersive, setIsImmersive] = useState(false);
@@ -441,8 +461,17 @@ export default function PublicAlbumView() {
     return () => clearTimeout(timer);
   }, [showDownloadToast]);
 
+  useEffect(() => {
+    if (!downloadNote) return;
+    const timer = setTimeout(() => {
+      setDownloadNote(null);
+    }, 9000);
+    return () => clearTimeout(timer);
+  }, [downloadNote]);
+
   const toggleFavorite = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    const adding = !selectedIds.has(id);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -452,6 +481,7 @@ export default function PublicAlbumView() {
       }
       return next;
     });
+    if (adding) dismissSelectHint();
   };
 
   const handleSelectAll = () => {
@@ -460,17 +490,61 @@ export default function PublicAlbumView() {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(album.photos.map((p) => p.id)));
+      dismissSelectHint();
     }
   };
 
+  // Fetch with a per-item timeout, wired to the batch AbortController so
+  // Cancel stops in-flight requests immediately.
+  async function fetchWithTimeout(
+    url: string,
+    signal: AbortSignal,
+    ms = 30000
+  ): Promise<Blob> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.blob();
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  const cancelZipping = useCallback(() => {
+    zipAbortRef.current?.abort();
+  }, []);
+
+  const closeZipModal = useCallback(() => {
+    setIsZipping(false);
+    setZipError(null);
+    setZipProgress({ current: 0, total: 0, percent: 0 });
+  }, []);
+
   // Batch ZIP Export Generator (Handles both full-res photos and video clips)
+  // Cancellable via the modal's Cancel button; selection is preserved on cancel.
   const handleDownloadBatch = async (photosToDownload?: Photo[]) => {
     if (!album) return;
-    const targetPhotos = photosToDownload || album.photos.filter((p) => selectedIds.has(p.id));
+    const targetPhotos =
+      photosToDownload && photosToDownload.length > 0
+        ? photosToDownload
+        : album.photos.filter((p) => selectedIds.has(p.id));
     if (targetPhotos.length === 0) return;
 
+    const aborter = new AbortController();
+    zipAbortRef.current = aborter;
+    zipTargetsRef.current = targetPhotos;
     setIsZipping(true);
+    setZipError(null);
     setZipProgress({ current: 0, total: targetPhotos.length, percent: 0 });
+
+    const fail = (message: string) => {
+      setZipError(message);
+    };
 
     try {
       const zip = new JSZip();
@@ -478,12 +552,15 @@ export default function PublicAlbumView() {
       const folder = zip.folder(folderName) || zip;
 
       const CONCURRENCY = 3;
+      const failedNames: string[] = [];
       let completed = 0;
 
       for (let i = 0; i < targetPhotos.length; i += CONCURRENCY) {
+        if (aborter.signal.aborted) throw new Error("__cancelled__");
         const chunk = targetPhotos.slice(i, i + CONCURRENCY);
         await Promise.all(
           chunk.map(async (photo, chunkIndex) => {
+            if (aborter.signal.aborted) return;
             const indexNumber = i + chunkIndex + 1;
             const isVideo = photo.type === "video";
             const ext = photo.original_filename.includes(".")
@@ -492,18 +569,30 @@ export default function PublicAlbumView() {
               ? ".mp4"
               : ".jpg";
 
-            const fileName = `${String(indexNumber).padStart(3, "0")}_${photo.original_filename || `media_${photo.id}${ext}`}`;
+            const fileName = `${String(indexNumber).padStart(3, "0")}_${
+              photo.original_filename || `media_${photo.id}${ext}`
+            }`;
 
             try {
-              const res = await fetch(photo.urls.original);
-              if (!res.ok) throw new Error("Failed to fetch original");
-              const blob = await res.blob();
+              const blob = await fetchWithTimeout(photo.urls.original, aborter.signal);
               folder.file(fileName, blob);
-            } catch {
-              if (!isVideo && photo.urls.display) {
-                const fallbackRes = await fetch(photo.urls.display);
-                const fallbackBlob = await fallbackRes.blob();
-                folder.file(fileName.replace(/\.[^.]+$/, ".webp"), fallbackBlob);
+            } catch (firstErr) {
+              if (aborter.signal.aborted) return;
+              // One fallback: the smaller display version for images.
+              try {
+                if (!isVideo && photo.urls.display) {
+                  const fallbackBlob = await fetchWithTimeout(
+                    photo.urls.display,
+                    aborter.signal
+                  );
+                  folder.file(fileName.replace(/\.[^.]+$/, ".webp"), fallbackBlob);
+                } else {
+                  throw firstErr;
+                }
+              } catch {
+                if (!aborter.signal.aborted) {
+                  failedNames.push(photo.original_filename || photo.id);
+                }
               }
             }
 
@@ -514,10 +603,18 @@ export default function PublicAlbumView() {
         );
       }
 
+      if (aborter.signal.aborted) throw new Error("__cancelled__");
+
+      if (failedNames.length === targetPhotos.length) {
+        throw new Error("__none_downloaded__");
+      }
+
       const zipBlob = await zip.generateAsync({
         type: "blob",
         compression: "STORE",
       });
+
+      if (aborter.signal.aborted) throw new Error("__cancelled__");
 
       const blobUrl = window.URL.createObjectURL(zipBlob);
       const link = document.createElement("a");
@@ -528,14 +625,37 @@ export default function PublicAlbumView() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      setShowDownloadToast(true);
+      if (failedNames.length > 0) {
+        fail(
+          `Saved the ZIP, but ${failedNames.length} of ${targetPhotos.length} items couldn't be added. You can retry to get the rest.`
+        );
+      } else {
+        closeZipModal();
+        setShowDownloadToast(true);
+      }
     } catch (err: any) {
-      alert(`Download failed: ${err.message || "Network error"}`);
+      if (err?.message === "__cancelled__" || aborter.signal.aborted) {
+        // User cancelled — close the modal, keep the selection intact.
+        closeZipModal();
+      } else if (err?.message === "__none_downloaded__") {
+        fail("Couldn't download any of the items. Check your connection and try again.");
+      } else {
+        fail(`Download failed: ${err?.message || "Network error"}`);
+      }
     } finally {
-      setIsZipping(false);
-      setZipProgress({ current: 0, total: 0, percent: 0 });
+      zipAbortRef.current = null;
     }
   };
+
+  const retryZip = useCallback(() => {
+    const targets = zipTargetsRef.current;
+    if (targets.length === 0) {
+      closeZipModal();
+      return;
+    }
+    handleDownloadBatch(targets);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [album, selectedIds]);
 
   const triggerCue = (type: "both" | "left" | "right", duration: number) => {
     if (cueTimeoutRef.current) clearTimeout(cueTimeoutRef.current);
@@ -585,29 +705,66 @@ export default function PublicAlbumView() {
     exitLightbox();
   };
 
+  const isIOSDevice = () =>
+    typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+  const isTouchDevice = () =>
+    typeof navigator !== "undefined" &&
+    (navigator.maxTouchPoints > 0 || "ontouchstart" in window);
+
+  // Single-file download: fetch as a blob and trigger a real file save.
+  // iOS Safari ignores the download attribute, so there we open the file
+  // and tell the user how to save it instead of failing silently.
   const handleDownload = async (e: React.MouseEvent, url: string, filename: string, isVideo = false) => {
     e.stopPropagation();
-    setShowDownloadToast(true);
+    const fallbackName = filename || (isVideo ? "video.mp4" : "photo.jpg");
 
+    if (isIOSDevice()) {
+      setDownloadNote("Couldn't download directly on this device — long-press the image to save it.");
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+
+    setDownloadingSingle(true);
     try {
       const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = filename || (isVideo ? "video.mp4" : "photo.jpg");
+      link.download = fallbackName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
+      setShowDownloadToast(true);
     } catch {
+      setDownloadNote(
+        isTouchDevice()
+          ? "Couldn't download directly — long-press the image to save it."
+          : "Couldn't download directly — right-click the image and choose Save."
+      );
       const link = document.createElement("a");
       link.href = url;
       link.target = "_blank";
-      link.download = filename || (isVideo ? "video.mp4" : "photo.jpg");
+      link.rel = "noopener";
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+    } finally {
+      setDownloadingSingle(false);
     }
   };
+
+  function estimateAlbumSize(list: Photo[]): string {
+    let bytes = 0;
+    for (const p of list) {
+      bytes += p.type === "video" ? 50 * 1024 * 1024 : 9 * 1024 * 1024;
+    }
+    if (bytes >= 1024 ** 3) return `about ${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    return `about ${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+  }
 
   const handleShare = async () => {
     if (typeof navigator !== "undefined" && navigator.share) {
@@ -725,11 +882,11 @@ export default function PublicAlbumView() {
           </Link>
 
           <div className="flex items-center gap-2.5">
-            {/* Download Full Album Button */}
+            {/* Download Full Album Button — confirm first (large download) */}
             <button
-              onClick={() => handleDownloadBatch(album.photos)}
+              onClick={() => setShowFullAlbumConfirm(true)}
               disabled={isZipping}
-              className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+              className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-1.5 px-3 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm disabled:opacity-50"
               title="Download entire album as ZIP"
             >
               <Package size={12} className="text-emerald-400" />
@@ -786,7 +943,8 @@ export default function PublicAlbumView() {
               )}
               <button
                 onClick={handleSelectAll}
-                className="text-xs font-mono text-neutral-400 hover:text-white transition flex items-center gap-1.5 cursor-pointer"
+                className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+                title="Select every photo in this album for download"
               >
                 {selectedIds.size === photos.length ? (
                   <CheckSquare size={13} className="text-pink-400" />
@@ -805,6 +963,25 @@ export default function PublicAlbumView() {
         <div className="max-w-7xl mx-auto px-6">
           <ViewerPresenceBadge albumId={albumId} />
         </div>
+
+        {/* One-time hint: how photo selection works */}
+        {!hintDismissed && selectedIds.size === 0 && (
+          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-pink-950/40 border border-pink-800/50 text-pink-200 text-xs">
+            <Heart size={14} className="shrink-0 text-pink-400" fill="currentColor" />
+            <span>
+              Tap the <span className="font-semibold">heart</span> on any photo to select it for
+              download.
+            </span>
+            <button
+              type="button"
+              onClick={dismissSelectHint}
+              className="ml-auto p-1.5 rounded-lg text-pink-300/70 hover:text-pink-100 hover:bg-pink-900/50 transition cursor-pointer"
+              aria-label="Dismiss hint"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Dynamic Masonry Grid (Photos + Video Posters) */}
         <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
@@ -842,7 +1019,9 @@ export default function PublicAlbumView() {
                       ? "bg-pink-600 text-white shadow-lg shadow-pink-950/50 opacity-100 scale-100"
                       : "bg-black/60 text-white/70 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
                   }`}
-                  title={isFav ? "Remove from selected" : "Add to favorites / batch download"}
+                  title={isFav ? "Remove from selection" : "Select for download"}
+                  aria-label={isFav ? "Remove from download selection" : "Select photo for download"}
+                  aria-pressed={isFav}
                 >
                   <Heart size={14} fill={isFav ? "currentColor" : "none"} />
                 </button>
@@ -923,8 +1102,8 @@ export default function PublicAlbumView() {
                       ? "bg-pink-600 text-white"
                       : "bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white"
                   }`}
-                  title="Favorite / Add to selection"
-                  aria-label="Add photo to download selection"
+                  title={selectedIds.has(selectedPhoto.id) ? "Remove from selection" : "Select for download"}
+                  aria-label={selectedIds.has(selectedPhoto.id) ? "Remove from download selection" : "Select photo for download"}
                 >
                   <Heart size={16} fill={selectedIds.has(selectedPhoto.id) ? "currentColor" : "none"} />
                 </button>
@@ -944,6 +1123,7 @@ export default function PublicAlbumView() {
 
                 <button
                   type="button"
+                  disabled={downloadingSingle}
                   onClick={(e) =>
                     handleDownload(
                       e,
@@ -952,10 +1132,17 @@ export default function PublicAlbumView() {
                       selectedPhoto.type === "video"
                     )
                   }
-                  className="flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-60 text-white text-xs font-semibold backdrop-blur-md transition cursor-pointer"
+                  title="Download this file"
                 >
-                  <Download size={13} />
-                  <span className="hidden sm:inline">Download</span>
+                  {downloadingSingle ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Download size={13} />
+                  )}
+                  <span className="hidden sm:inline">
+                    {downloadingSingle ? "Saving…" : "Download"}
+                  </span>
                 </button>
 
                 <button
@@ -1122,31 +1309,126 @@ export default function PublicAlbumView() {
         </div>
       )}
 
-      {/* ZIP Progress Modal */}
+      {/* ZIP Progress Modal — cancellable, with error + retry (selection preserved) */}
       {isZipping && (
         <div className="fixed inset-0 z-[90] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
           <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-2xl max-w-sm w-full space-y-4 text-center shadow-2xl">
-            <div className="w-12 h-12 rounded-xl bg-blue-950/80 border border-blue-800/80 text-blue-400 flex items-center justify-center mx-auto">
-              <Package size={24} className="animate-bounce" />
+            {zipError ? (
+              <>
+                <div className="w-12 h-12 rounded-xl bg-red-950/80 border border-red-800/80 text-red-400 flex items-center justify-center mx-auto">
+                  <AlertCircle size={24} />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                    Download hiccup
+                  </h3>
+                  <p className="text-xs text-neutral-400 leading-relaxed">{zipError}</p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={retryZip}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition cursor-pointer"
+                  >
+                    <Download size={14} />
+                    <span>Retry</span>
+                  </button>
+                  <button
+                    onClick={closeZipModal}
+                    className="flex-1 px-4 py-2.5 min-h-[44px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-xl bg-blue-950/80 border border-blue-800/80 text-blue-400 flex items-center justify-center mx-auto">
+                  <Package size={24} className="animate-bounce" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+                    Packaging Media ZIP
+                  </h3>
+                  <p className="text-xs text-neutral-400 font-mono">
+                    Item {zipProgress.current} of {zipProgress.total} ({zipProgress.percent}%)
+                  </p>
+                </div>
+
+                <div className="w-full bg-neutral-900 rounded-full h-2 overflow-hidden border border-neutral-800">
+                  <div
+                    className="bg-blue-600 h-full transition-all duration-200 rounded-full"
+                    style={{ width: `${zipProgress.percent}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Packing full-resolution assets in memory...
+                </p>
+                <button
+                  onClick={cancelZipping}
+                  className="w-full px-4 py-2.5 min-h-[44px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Full-album download confirmation (FIX 4) */}
+      {showFullAlbumConfirm && (
+        <div className="fixed inset-0 z-[95] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 p-6 rounded-2xl max-w-sm w-full space-y-4 text-center shadow-2xl">
+            <div className="w-12 h-12 rounded-xl bg-emerald-950/80 border border-emerald-800/80 text-emerald-400 flex items-center justify-center mx-auto">
+              <Package size={24} />
             </div>
             <div className="space-y-1">
               <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-                Packaging Media ZIP
+                Download full album?
               </h3>
-              <p className="text-xs text-neutral-400 font-mono">
-                Item {zipProgress.current} of {zipProgress.total} ({zipProgress.percent}%)
+              <p className="text-xs text-neutral-300 font-mono">
+                {photos.length} items • {estimateAlbumSize(photos)}
+              </p>
+              <p className="text-[11px] text-neutral-500 leading-relaxed pt-1">
+                This packages every full-resolution file in your browser and can take several
+                minutes, especially on mobile data.
               </p>
             </div>
-
-            <div className="w-full bg-neutral-900 rounded-full h-2 overflow-hidden border border-neutral-800">
-              <div
-                className="bg-blue-600 h-full transition-all duration-200 rounded-full"
-                style={{ width: `${zipProgress.percent}%` }}
-              />
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => {
+                  setShowFullAlbumConfirm(false);
+                  handleDownloadBatch(album.photos);
+                }}
+                className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition cursor-pointer"
+              >
+                <Download size={14} />
+                <span>Download</span>
+              </button>
+              <button
+                onClick={() => setShowFullAlbumConfirm(false)}
+                className="flex-1 px-4 py-2.5 min-h-[44px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+              >
+                Cancel
+              </button>
             </div>
-            <p className="text-[11px] text-neutral-500">
-              Packing full-resolution assets in memory...
-            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback guidance toast (when a direct download isn't possible) */}
+      {downloadNote && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[80] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-amber-950/95 backdrop-blur-md border border-amber-800/80 text-white shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-100 leading-relaxed flex-1">{downloadNote}</p>
+            <button
+              onClick={() => setDownloadNote(null)}
+              className="text-amber-300/70 hover:text-amber-100 transition p-1 -m-1 cursor-pointer shrink-0"
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
           </div>
         </div>
       )}

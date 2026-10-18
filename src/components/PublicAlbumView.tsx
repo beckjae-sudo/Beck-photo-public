@@ -779,8 +779,15 @@ export default function PublicAlbumView() {
           text: `Check out high-resolution game shots from "${album?.title}":`,
           url: window.location.href,
         });
-        return;
-      } catch {}
+      } catch (err) {
+        // Dismissing the native sheet (AbortError) means "never mind" —
+        // don't pop our own sheet on top of it. Only fall back to the
+        // custom share sheet on a genuine failure.
+        if ((err as Error)?.name !== "AbortError") {
+          setIsShareOpen(true);
+        }
+      }
+      return;
     }
     setIsShareOpen(true);
   };

@@ -19,7 +19,8 @@ import {
   Coffee,
   ArrowRight,
   Share2,
-  Heart,
+  Check,
+  Circle,
   CheckSquare,
   Square,
   Package,
@@ -184,21 +185,29 @@ export default function PublicAlbumView() {
     setDragOffset(0);
   }, [selectedIndex]);
 
+  // Force-load the full-resolution original for a photo (used by the
+  // background preload AND the moment zoom starts, so zooming never
+  // magnifies the downscaled display version).
+  const ensureHighRes = useCallback((photo: Photo | null) => {
+    if (!photo || photo.type === "video") return;
+    const originalUrl = photo.urls.original;
+    if (!originalUrl) return;
+    setLoadedHighResIds((prev) => {
+      if (prev.has(photo.id)) return prev;
+      const img = new Image();
+      img.src = originalUrl;
+      img.onload = () => {
+        setLoadedHighResIds((p) => new Set(p).add(photo.id));
+      };
+      return prev;
+    });
+  }, []);
+
   // Silent Background High-Res Master Preload (Images only)
   useEffect(() => {
     if (selectedIndex === null || !selectedPhoto) return;
-    if (selectedPhoto.type === "video") return;
-    const photoId = selectedPhoto.id;
-    const originalUrl = selectedPhoto.urls.original;
-
-    if (!originalUrl || loadedHighResIds.has(photoId)) return;
-
-    const img = new Image();
-    img.src = originalUrl;
-    img.onload = () => {
-      setLoadedHighResIds((prev) => new Set(prev).add(photoId));
-    };
-  }, [selectedIndex, selectedPhoto, loadedHighResIds]);
+    ensureHighRes(selectedPhoto);
+  }, [selectedIndex, selectedPhoto, ensureHighRes]);
 
   // Background Image Preloader for Adjacent Slides (Images only)
   useEffect(() => {
@@ -231,6 +240,7 @@ export default function PublicAlbumView() {
     // 1. Two-finger Pinch Zoom Start
     if (e.touches.length === 2) {
       touchMode.current = "pinching";
+      ensureHighRes(selectedPhoto);
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
@@ -260,6 +270,9 @@ export default function PublicAlbumView() {
         } else {
           zoomScaleRef.current = 2.5;
           setZoomScale(2.5);
+          // Zooming in: make sure the full-res original is loading so the
+          // zoom doesn't magnify the downscaled display version.
+          ensureHighRes(selectedPhoto);
         }
         setDragOffset(0);
         return;
@@ -978,10 +991,10 @@ export default function PublicAlbumView() {
 
         {/* One-time hint: how photo selection works */}
         {!hintDismissed && selectedIds.size === 0 && (
-          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-pink-950/40 border border-pink-800/50 text-pink-200 text-xs">
-            <Heart size={14} className="shrink-0 text-pink-400" fill="currentColor" />
+          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-blue-950/40 border border-blue-800/50 text-blue-200 text-xs">
+            <Check size={14} className="shrink-0 text-blue-400" strokeWidth={3} />
             <span>
-              Tap the <span className="font-semibold">heart</span> on any photo to select it for
+              Tap the <span className="font-semibold">checkmark</span> on any photo to select it for
               download.
             </span>
             <button
@@ -1028,14 +1041,14 @@ export default function PublicAlbumView() {
                   onClick={(e) => toggleFavorite(e, photo.id)}
                   className={`absolute top-2 left-2 p-2.5 rounded-full backdrop-blur-md transition-all duration-200 z-10 cursor-pointer ${
                     isFav
-                      ? "bg-pink-600 text-white shadow-lg shadow-pink-950/50 opacity-100 scale-100"
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-950/50 opacity-100 scale-100"
                       : "bg-black/60 text-white/70 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
                   }`}
                   title={isFav ? "Remove from selection" : "Select for download"}
                   aria-label={isFav ? "Remove from download selection" : "Select photo for download"}
                   aria-pressed={isFav}
                 >
-                  <Heart size={14} fill={isFav ? "currentColor" : "none"} />
+                  {isFav ? <Check size={14} strokeWidth={3} /> : <Circle size={14} />}
                 </button>
 
                 <div className="hidden sm:flex absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center gap-2 pointer-events-none">
@@ -1111,13 +1124,13 @@ export default function PublicAlbumView() {
                   onClick={(e) => toggleFavorite(e, selectedPhoto.id)}
                   className={`p-2.5 rounded-lg backdrop-blur-md transition cursor-pointer ${
                     selectedIds.has(selectedPhoto.id)
-                      ? "bg-pink-600 text-white"
+                      ? "bg-blue-600 text-white"
                       : "bg-white/10 hover:bg-white/20 text-neutral-300 hover:text-white"
                   }`}
                   title={selectedIds.has(selectedPhoto.id) ? "Remove from selection" : "Select for download"}
                   aria-label={selectedIds.has(selectedPhoto.id) ? "Remove from download selection" : "Select photo for download"}
                 >
-                  <Heart size={16} fill={selectedIds.has(selectedPhoto.id) ? "currentColor" : "none"} />
+                  {selectedIds.has(selectedPhoto.id) ? <Check size={16} strokeWidth={3} /> : <Circle size={16} />}
                 </button>
 
                 <button

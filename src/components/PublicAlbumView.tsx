@@ -189,11 +189,12 @@ export default function PublicAlbumView() {
   // background preload AND the moment zoom starts, so zooming never
   // magnifies the downscaled display version).
   const highResLoadingRef = useRef<Set<string>>(new Set());
-  const ensureHighRes = useCallback((photo: Photo | null) => {
+  const ensureHighRes = useCallback((photo: Photo | null, priority: "high" | "low" | "auto" = "auto") => {
     if (!photo || photo.type === "video" || !photo.urls.original) return;
     if (highResLoadingRef.current.has(photo.id)) return;
     highResLoadingRef.current.add(photo.id);
     const img = new Image();
+    img.setAttribute("fetchpriority", priority);
     img.src = photo.urls.original;
     img.onload = () => {
       setLoadedHighResIds((prev) => new Set(prev).add(photo.id));
@@ -203,28 +204,34 @@ export default function PublicAlbumView() {
     };
   }, []);
 
-  // Silent Background High-Res Master Preload (Images only)
+  // Prioritized lightbox preloads.
+  // The 9MB full original used to download the instant a photo opened,
+  // saturating mobile bandwidth and starving the NEXT photo's small display
+  // version — which is why swiping felt delayed. Now:
+  //  1. Adjacent photos' display versions load FIRST at high priority, so the
+  //     next/previous photo is ready the moment you swipe.
+  //  2. The current photo's original loads at low priority in the background;
+  //     it's only needed for zoom sharpness, never for navigation.
   useEffect(() => {
-    if (selectedIndex === null || !selectedPhoto) return;
-    ensureHighRes(selectedPhoto);
-  }, [selectedIndex, selectedPhoto, ensureHighRes]);
+    if (selectedIndex === null || !selectedPhoto || photos.length === 0) return;
+    if (selectedPhoto.type === "video") return;
 
-  // Background Image Preloader for Adjacent Slides (Images only)
-  useEffect(() => {
-    if (selectedIndex === null || photos.length === 0) return;
-    const indicesToPreload = [
+    const adjacentIdx = [
       (selectedIndex + 1) % photos.length,
-      (selectedIndex + 2) % photos.length,
       (selectedIndex - 1 + photos.length) % photos.length,
+      (selectedIndex + 2) % photos.length,
     ];
-    indicesToPreload.forEach((idx) => {
+    adjacentIdx.forEach((idx) => {
       const item = photos[idx];
       if (item?.urls?.display && item.type !== "video") {
         const img = new Image();
+        img.setAttribute("fetchpriority", "high");
         img.src = item.urls.display;
       }
     });
-  }, [selectedIndex, photos]);
+
+    ensureHighRes(selectedPhoto, "low");
+  }, [selectedIndex, selectedPhoto, photos, ensureHighRes]);
 
   // Active Lightbox Photo Source (Swaps to crystal-clear original once cached)
   const activeImageSrc =

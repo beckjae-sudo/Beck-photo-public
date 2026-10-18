@@ -126,6 +126,10 @@ export default function PublicAlbumView() {
   const [showFullAlbumConfirm, setShowFullAlbumConfirm] = useState(false);
   const [downloadNote, setDownloadNote] = useState<string | null>(null);
   const [downloadingSingle, setDownloadingSingle] = useState(false);
+  // Tracks which photo's lightbox image has actually finished loading, so a
+  // spinner can show while the next photo arrives (instead of the old photo
+  // misleadingly lingering, which read as "the next image isn't available").
+  const [loadedPhotoId, setLoadedPhotoId] = useState<string | null>(null);
   // iOS can't save files directly from the browser: hold the pending download
   // and show an in-lightbox guide BEFORE opening the new tab, so the user
   // actually sees the instructions instead of being whisked away first.
@@ -1148,6 +1152,13 @@ export default function PublicAlbumView() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
+          {/* Loading spinner while the current photo's image arrives (the old
+              photo no longer lingers, so this makes the loading state honest) */}
+          {selectedPhoto.type !== "video" && loadedPhotoId !== selectedPhoto.id && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
+              <Loader2 size={36} className="animate-spin text-white/50" />
+            </div>
+          )}
           {!isImmersive && (
             <>
               {/* Top Controls */}
@@ -1278,7 +1289,9 @@ export default function PublicAlbumView() {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <img
+                    key={selectedPhoto.id}
                     src={activeImageSrc}
+                    onLoad={() => setLoadedPhotoId(selectedPhoto.id)}
                     alt={selectedPhoto.original_filename}
                     className="rounded-lg shadow-2xl pointer-events-none select-none"
                     style={
@@ -1330,7 +1343,9 @@ export default function PublicAlbumView() {
                 </div>
               ) : (
                 <img
+                  key={selectedPhoto.id}
                   src={activeImageSrc}
+                  onLoad={() => setLoadedPhotoId(selectedPhoto.id)}
                   alt={selectedPhoto.original_filename}
                   className="w-full h-full object-contain pointer-events-none select-none"
                   style={{

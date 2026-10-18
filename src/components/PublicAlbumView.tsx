@@ -188,19 +188,19 @@ export default function PublicAlbumView() {
   // Force-load the full-resolution original for a photo (used by the
   // background preload AND the moment zoom starts, so zooming never
   // magnifies the downscaled display version).
+  const highResLoadingRef = useRef<Set<string>>(new Set());
   const ensureHighRes = useCallback((photo: Photo | null) => {
-    if (!photo || photo.type === "video") return;
-    const originalUrl = photo.urls.original;
-    if (!originalUrl) return;
-    setLoadedHighResIds((prev) => {
-      if (prev.has(photo.id)) return prev;
-      const img = new Image();
-      img.src = originalUrl;
-      img.onload = () => {
-        setLoadedHighResIds((p) => new Set(p).add(photo.id));
-      };
-      return prev;
-    });
+    if (!photo || photo.type === "video" || !photo.urls.original) return;
+    if (highResLoadingRef.current.has(photo.id)) return;
+    highResLoadingRef.current.add(photo.id);
+    const img = new Image();
+    img.src = photo.urls.original;
+    img.onload = () => {
+      setLoadedHighResIds((prev) => new Set(prev).add(photo.id));
+    };
+    img.onerror = () => {
+      highResLoadingRef.current.delete(photo.id);
+    };
   }, []);
 
   // Silent Background High-Res Master Preload (Images only)
@@ -231,6 +231,36 @@ export default function PublicAlbumView() {
     selectedPhoto && loadedHighResIds.has(selectedPhoto.id)
       ? selectedPhoto.urls.original
       : selectedPhoto?.urls.display || "";
+
+  // Zoom layout: when zoomed, the image gets an explicit pixel size (instead
+  // of CSS transform: scale()) so the browser re-rasterizes from the
+  // high-res source. transform: scale() only magnifies the already-rendered
+  // small bitmap, which is why zoom looked pixelated.
+  const zoomLayout = useMemo(() => {
+    if (!selectedPhoto || typeof window === "undefined")
+      return { w: 0, h: 0, maxPanX: 0, maxPanY: 0 };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const aspect = selectedPhoto.width / selectedPhoto.height || 1;
+    let w = vw * 0.85;
+    let h = w / aspect;
+    if (h > vh * 0.85) {
+      h = vh * 0.85;
+      w = h * aspect;
+    }
+    const zw = w * zoomScale;
+    const zh = h * zoomScale;
+    return {
+      w: zw,
+      h: zh,
+      maxPanX: Math.max(0, (zw - vw) / 2),
+      maxPanY: Math.max(0, (zh - vh) / 2),
+    };
+  }, [selectedPhoto, zoomScale]);
+
+  const clampedPanX = Math.min(zoomLayout.maxPanX, Math.max(-zoomLayout.maxPanX, panOffset.x));
+  const clampedPanY = Math.min(zoomLayout.maxPanY, Math.max(-zoomLayout.maxPanY, panOffset.y));
+  const isZoomed = zoomScale > 1.05 && zoomLayout.w > 0;
 
   // Touch Gestures
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -1230,24 +1260,26 @@ export default function PublicAlbumView() {
                 </div>
               ) : (
                 <div
-                  className="max-h-[85vh] max-w-[85vw] flex items-center justify-center transition-transform ease-out"
+                  className="flex items-center justify-center shrink-0"
                   style={{
-                    transform: `translate3d(${dragOffset + panOffset.x}px, ${panOffset.y}px, 0px) scale(${zoomScale})`,
-                    transitionDuration: touchMode.current !== "idle" || zoomScale > 1 ? "0ms" : "150ms",
+                    ...(isZoomed
+                      ? { width: zoomLayout.w, height: zoomLayout.h }
+                      : { maxHeight: "85vh", maxWidth: "85vw" }),
+                    transform: `translate3d(${clampedPanX + (isZoomed ? 0 : dragOffset)}px, ${clampedPanY}px, 0px)`,
                     touchAction: "none",
-                    willChange: touchMode.current !== "idle" ? "transform" : "auto",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <img
                     src={activeImageSrc}
                     alt={selectedPhoto.original_filename}
-                    className="max-h-[85vh] max-w-[85vw] object-contain rounded-lg shadow-2xl pointer-events-none select-none"
-                    style={{
-                      imageRendering: "-webkit-optimize-contrast" as any,
-                      WebkitBackfaceVisibility: "hidden",
-                      backfaceVisibility: "hidden",
-                    }}
+                    className="rounded-lg shadow-2xl pointer-events-none select-none"
+                    style={
+                      isZoomed
+                        ? { width: "100%", height: "100%", objectFit: "contain" }
+                        : { maxHeight: "85vh", maxWidth: "85vw", objectFit: "contain" }
+                    }
+                    draggable={false}
                   />
                 </div>
               )}

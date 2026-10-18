@@ -125,6 +125,10 @@ export default function PublicAlbumView() {
   const [showFullAlbumConfirm, setShowFullAlbumConfirm] = useState(false);
   const [downloadNote, setDownloadNote] = useState<string | null>(null);
   const [downloadingSingle, setDownloadingSingle] = useState(false);
+  // iOS can't save files directly from the browser: hold the pending download
+  // and show an in-lightbox guide BEFORE opening the new tab, so the user
+  // actually sees the instructions instead of being whisked away first.
+  const [iosGuide, setIosGuide] = useState<{ url: string; filename: string } | null>(null);
   const [hintDismissed, setHintDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem("bpp-select-hint") === "1";
@@ -720,8 +724,9 @@ export default function PublicAlbumView() {
     const fallbackName = filename || (isVideo ? "video.mp4" : "photo.jpg");
 
     if (isIOSDevice()) {
-      setDownloadNote("Couldn't download directly on this device — long-press the image to save it.");
-      window.open(url, "_blank", "noopener");
+      // Don't open the tab yet — show the guide first so the instructions
+      // are read BEFORE the tab switch (a toast on this page would be invisible).
+      setIosGuide({ url, filename: fallbackName });
       return;
     }
 
@@ -1416,9 +1421,52 @@ export default function PublicAlbumView() {
         </div>
       )}
 
+      {/* iOS download guide: shown BEFORE opening the new tab so the
+          instructions are read first (a toast would be left behind on the page). */}
+      {iosGuide && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6"
+          onClick={() => setIosGuide(null)}
+        >
+          <div
+            className="w-full max-w-xs rounded-2xl bg-neutral-900 border border-white/10 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2.5 mb-3">
+              <Download size={18} className="text-blue-400" />
+              <h3 className="text-white text-sm font-bold">Saving this photo</h3>
+            </div>
+            <p className="text-neutral-300 text-[13px] leading-relaxed mb-1">
+              iPhone can&apos;t save files straight from the browser.
+            </p>
+            <p className="text-neutral-300 text-[13px] leading-relaxed mb-5">
+              Tap <span className="text-white font-semibold">Open Full Photo</span> below,
+              then <span className="text-white font-semibold">touch and hold</span> the
+              image and tap <span className="text-white font-semibold">Save to Photos</span>.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                window.open(iosGuide.url, "_blank", "noopener");
+                setIosGuide(null);
+              }}
+              className="w-full min-h-[44px] rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition cursor-pointer mb-2"
+            >
+              Open Full Photo
+            </button>
+            <button
+              type="button"
+              onClick={() => setIosGuide(null)}
+              className="w-full min-h-[44px] rounded-xl bg-white/10 hover:bg-white/20 text-neutral-300 text-sm font-semibold transition cursor-pointer"
+            >
+              Not Now
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Fallback guidance toast (when a direct download isn't possible) */}
-      {downloadNote && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[80] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-amber-950/95 backdrop-blur-md border border-amber-800/80 text-white shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+      {downloadNote && (        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[80] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-xl bg-amber-950/95 backdrop-blur-md border border-amber-800/80 text-white shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex items-start gap-2.5">
             <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
             <p className="text-xs text-amber-100 leading-relaxed flex-1">{downloadNote}</p>

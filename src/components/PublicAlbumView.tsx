@@ -823,12 +823,15 @@ export default function PublicAlbumView() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
       setShowDownloadToast(true);
-    } catch {
+    } catch (err) {
+      // Show the guidance FIRST (before opening the tab) so the user actually
+      // sees it, and include the technical reason to aid diagnosis.
+      const reason = err instanceof Error ? err.message : String(err);
       setDownloadNote(
-        isTouchDevice()
-          ? "Couldn't download directly — long-press the image to save it."
-          : "Couldn't download directly — right-click the image and choose Save."
+        `Couldn't download directly (${reason}) — right-click the image and choose Save.`
       );
+      // Delay the tab open slightly so the toast paints first.
+      await new Promise((r) => setTimeout(r, 600));
       const link = document.createElement("a");
       link.href = url;
       link.target = "_blank";

@@ -237,6 +237,15 @@ export default function PublicAlbumView() {
     ensureHighRes(selectedPhoto, "low");
   }, [selectedIndex, selectedPhoto, photos, ensureHighRes]);
 
+  // True on mouse-capable devices (desktop). Click-to-navigate zones are
+  // only rendered here so mobile tap/swipe behavior is completely untouched.
+  const canHover = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches,
+    []
+  );
+
   // Active Lightbox Photo Source (Swaps to crystal-clear original once cached)
   const activeImageSrc =
     selectedPhoto && loadedHighResIds.has(selectedPhoto.id)
@@ -554,23 +563,39 @@ export default function PublicAlbumView() {
 
   // Fetch with a per-item timeout, wired to the batch AbortController so
   // Cancel stops in-flight requests immediately.
+  // Fetch with a per-item timeout and automatic retries for transient
+  // network blips (up to 3 attempts with a short backoff). A single failed
+  // fetch shouldn't surface as an error to the user when a retry succeeds.
   async function fetchWithTimeout(
     url: string,
     signal: AbortSignal,
-    ms = 30000
+    ms = 45000,
+    maxAttempts = 3
   ): Promise<Blob> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), ms);
-    const onAbort = () => ctrl.abort();
-    signal.addEventListener("abort", onAbort, { once: true });
-    try {
-      const res = await fetch(url, { signal: ctrl.signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.blob();
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onAbort);
+    let lastErr: unknown = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (signal.aborted) throw new Error("__cancelled__");
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), ms);
+      const onAbort = () => ctrl.abort();
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.blob();
+      } catch (err) {
+        lastErr = err;
+        // Don't retry user-cancelled requests.
+        if (signal.aborted || ctrl.signal.aborted) throw err;
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+        }
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+      }
     }
+    throw lastErr;
   }
 
   const cancelZipping = useCallback(() => {
@@ -1382,6 +1407,35 @@ export default function PublicAlbumView() {
                     <span>Exit Full Screen</span>
                   </button>
                 </div>
+              )}
+
+              {/* Desktop click-to-navigate zones (mouse only — never rendered on
+                  touch devices, so mobile swipe behavior is untouched) */}
+              {canHover && (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showPrev();
+                      triggerCue("left", 500);
+                    }}
+                    className="absolute left-0 top-0 bottom-0 w-[30%] z-20 cursor-w-resize"
+                    aria-label="Previous photo"
+                    title="Previous photo"
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showNext();
+                      triggerCue("right", 500);
+                    }}
+                    className="absolute right-0 top-0 bottom-0 w-[30%] z-20 cursor-e-resize"
+                    aria-label="Next photo"
+                    title="Next photo"
+                  />
+                </>
               )}
             </div>
           )}

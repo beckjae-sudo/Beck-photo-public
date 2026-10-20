@@ -113,6 +113,7 @@ export default function AdminStudioView() {
   const [importingAlbums, setImportingAlbums] = useState(false);
   const [importResult, setImportResult] = useState<number | null>(null);
   const [importError, setImportError] = useState("");
+  const [importHiddenCategories, setImportHiddenCategories] = useState<string[]>([]);
 
   useEffect(() => {
     checkAdminAuth().then((auth) => {
@@ -190,8 +191,9 @@ export default function AdminStudioView() {
         (a: any) => a && a.id && !pubIds.has(String(a.id))
       );
       setImportCandidates(candidates);
-      // Pre-select everything — the common case is "bring it all over"
-      setSelectedImportIds(new Set(candidates.map((a: any) => String(a.id))));
+      // Fail-closed: nothing is pre-selected. Picking what goes public is a
+      // deliberate act — importing must never be a one-click accident.
+      setSelectedImportIds(new Set());
       setImportListLoaded(true);
     } catch (e) {
       console.error("Error loading family albums:", e);
@@ -223,10 +225,12 @@ export default function AdminStudioView() {
     setImportingAlbums(true);
     setImportError("");
     setImportResult(null);
+    setImportHiddenCategories([]);
     try {
       const res = await importAlbumsFromFamily([...selectedImportIds]);
       if (!res.success) throw new Error(res.error || "Import failed");
       setImportResult(res.imported ?? 0);
+      setImportHiddenCategories(res.hiddenCategories ?? []);
       setSelectedImportIds(new Set());
       await loadData(); // refresh live albums + categories
       await loadImportCandidates(); // refresh the diff
@@ -899,6 +903,24 @@ export default function AdminStudioView() {
                   {importResult > 0
                     ? `Imported ${importResult} album${importResult === 1 ? "" : "s"} to the public site.`
                     : "Nothing new to import — those albums are already on the public site."}
+                </div>
+              )}
+
+              {importHiddenCategories.length > 0 && (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-300 text-xs">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>
+                    Not public yet:{" "}
+                    {importHiddenCategories.length === 1 ? "category" : "categories"}{" "}
+                    <strong>{importHiddenCategories.join(", ")}</strong>{" "}
+                    {importHiddenCategories.length === 1 ? "is" : "are"} not enabled
+                    on the public site, so the imported albums in{" "}
+                    {importHiddenCategories.length === 1 ? "it" : "them"} won&apos;t
+                    appear publicly. Importing never changes visibility — enable{" "}
+                    {importHiddenCategories.length === 1 ? "the category" : "a category"}{" "}
+                    deliberately under Visible Categories in Site Design &amp;
+                    Categories when you&apos;re ready.
+                  </span>
                 </div>
               )}
 

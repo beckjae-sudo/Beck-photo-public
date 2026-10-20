@@ -550,13 +550,22 @@ export async function deleteAlbum(albumId: string): Promise<{ success: boolean; 
  * Import family-site albums into this site's index by album id.
  * Photo files are shared (identical R2 keys); only the album listing is copied.
  * Dedups by id, so re-importing is safe. Imported entries keep the family
- * index's newest-first order. Any imported album whose category is not in the
- * public config's visible_categories gets its category auto-added so the
- * imported albums actually appear on the public site.
+ * index's newest-first order.
+ *
+ * Fail-closed on visibility: importing NEVER changes which categories are
+ * public. If an imported album's category is not in visible_categories, the
+ * album stays hidden on the public site and its category is reported back in
+ * `hiddenCategories` so the admin UI can say so — making it public is a
+ * separate, deliberate step in Site Design & Categories.
  */
 export async function importAlbumsFromFamily(
   albumIds: string[]
-): Promise<{ success: boolean; imported?: number; error?: string }> {
+): Promise<{
+  success: boolean;
+  imported?: number;
+  hiddenCategories?: string[];
+  error?: string;
+}> {
   try {
     const isAuth = await checkAdminAuth();
     if (!isAuth) return { success: false, error: "Unauthorized" };
@@ -616,35 +625,27 @@ export async function importAlbumsFromFamily(
       );
     }
 
-    // 3. Auto-add new categories to visible_categories so imports actually appear,
-    //    and to the canonical categories list so they show in the manager/picker.
+    // 3. Report (never fix) visibility: importing must not make a category
+    //    public as a side effect. Any imported album whose category is not
+    //    currently visible stays hidden; name those categories so the admin
+    //    UI can tell the maintainer exactly what won't appear and why.
     const config = await getPublicSiteConfig();
     const visibleLower = new Set(
       config.visible_categories.map((c) => c.toLowerCase().trim())
     );
-    const canonicalLower = new Set(
-      config.categories.map((c) => c.toLowerCase().trim())
-    );
-    let categoriesAdded = false;
+    const hiddenCategories: string[] = [];
+    const hiddenSeen = new Set<string>();
     for (const a of toImport) {
       const cat = String(a.category || "").trim();
       if (!cat) continue;
-      if (!visibleLower.has(cat.toLowerCase())) {
-        config.visible_categories.push(cat);
-        visibleLower.add(cat.toLowerCase());
-        categoriesAdded = true;
+      const key = cat.toLowerCase();
+      if (!visibleLower.has(key) && !hiddenSeen.has(key)) {
+        hiddenSeen.add(key);
+        hiddenCategories.push(cat);
       }
-      if (!canonicalLower.has(cat.toLowerCase())) {
-        config.categories.push(cat);
-        canonicalLower.add(cat.toLowerCase());
-        categoriesAdded = true;
-      }
-    }
-    if (categoriesAdded) {
-      await savePublicSiteConfigToR2(config);
     }
 
-    return { success: true, imported: toImport.length };
+    return { success: true, imported: toImport.length, hiddenCategories };
   } catch (err: any) {
     return { success: false, error: err?.message || String(err) };
   }

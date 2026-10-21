@@ -22,6 +22,7 @@ import {
   deletePhotoFromR2,
 } from "@/app/admin/actions";
 import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
+import AdminAlbumInsights from "@/components/AdminAlbumInsights";
 
 export type MediaType = "image" | "video";
 
@@ -619,6 +620,8 @@ export default function EditAlbumView() {
             })}
           </div>
         </div>
+
+        <AdminAlbumInsights albumId={albumId} category={category} photos={photos} />
       </main>
     </div>
   );

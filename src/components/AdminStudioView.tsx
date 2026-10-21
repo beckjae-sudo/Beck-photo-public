@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   checkAdminAuth,
@@ -12,6 +12,9 @@ import {
   importAlbumsFromFamily,
   renameCategory,
   deleteCategory,
+  getAutoTagConfig,
+  autoTagPhoto,
+  finishAutoTagRun,
 } from "@/app/admin/actions";
 import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, RosterPlayer } from "@/lib/types";
 import { FONT_OPTIONS, fontVariableFor } from "@/lib/fonts";
@@ -37,6 +40,8 @@ import {
   Pencil,
   Plus,
   X,
+  Sparkles,
+  Square,
 } from "lucide-react";
 
 function formatDuration(seconds?: number): string {
@@ -696,6 +701,220 @@ export default function AdminStudioView() {
       team_descriptions[cat] = text;
       return { ...prev, team_descriptions };
     });
+  };
+
+  // ---------- Category auto-tag sweep (Phase 2) ----------
+  // "Auto-tag all albums in this category": walks every album in the
+  // category, album by album and photo by photo, through the SAME
+  // per-photo server action the album editor's Auto-tag button uses —
+  // same tags.json processed markers (already-read photos are skipped),
+  // same roster + team look. Per-album failures are logged, never fatal.
+  interface SweepState {
+    category: string;
+    running: boolean;
+    albumIdx: number;
+    albumTotal: number;
+    albumTitle: string;
+    photoDone: number;
+    photoTotal: number;
+    albumsProcessed: number;
+    photosProcessed: number;
+    photosSkipped: number;
+    photosFailed: number;
+    tagsCreated: number;
+    unknown: string[];
+    failures: string[];
+    notConfigured: boolean;
+    cancelled: boolean;
+    done: boolean;
+  }
+  const [sweep, setSweep] = useState<SweepState | null>(null);
+  const sweepCancelRef = useRef(false);
+
+  const albumsInCategory = (cat: string) =>
+    albums.filter(
+      (a) => String(a?.category || "").trim().toLowerCase() === cat.trim().toLowerCase()
+    );
+
+  const runCategorySweep = async (cat: string) => {
+    if (sweep?.running) return;
+    const catAlbums = albumsInCategory(cat);
+    if (catAlbums.length === 0) return;
+
+    const base: SweepState = {
+      category: cat,
+      running: true,
+      albumIdx: 0,
+      albumTotal: catAlbums.length,
+      albumTitle: "",
+      photoDone: 0,
+      photoTotal: 0,
+      albumsProcessed: 0,
+      photosProcessed: 0,
+      photosSkipped: 0,
+      photosFailed: 0,
+      tagsCreated: 0,
+      unknown: [],
+      failures: [],
+      notConfigured: false,
+      cancelled: false,
+      done: false,
+    };
+    setSweep(base);
+
+    const cfg = await getAutoTagConfig().catch(() => ({ configured: true }));
+    if (!cfg.configured) {
+      setSweep({ ...base, running: false, done: true, notConfigured: true });
+      return;
+    }
+
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+    if (!baseUrl) {
+      setSweep({
+        ...base,
+        running: false,
+        done: true,
+        failures: ["NEXT_PUBLIC_R2_BASE_URL is not set — can't load album photos."],
+      });
+      return;
+    }
+
+    sweepCancelRef.current = false;
+    const totals = {
+      albumsProcessed: 0,
+      photosProcessed: 0,
+      photosSkipped: 0,
+      photosFailed: 0,
+      tagsCreated: 0,
+    };
+    const unknownSet = new Set<string>();
+    const failures: string[] = [];
+    let stopAll = false;
+
+    for (let ai = 0; ai < catAlbums.length; ai++) {
+      if (sweepCancelRef.current || stopAll) break;
+      const album = catAlbums[ai];
+      setSweep((prev) =>
+        prev
+          ? { ...prev, albumIdx: ai, albumTitle: album.title || album.id, photoDone: 0, photoTotal: 0 }
+          : prev
+      );
+
+      // Load this album's photos from its manifest (public read).
+      let manifestPhotos: any[] = [];
+      try {
+        const encodedPath = String(album.id)
+          .split("/")
+          .map((segment: string) => encodeURIComponent(segment))
+          .join("/");
+        const res = await fetch(`${baseUrl}/${encodedPath}/manifest.json`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        manifestPhotos = (Array.isArray(data?.photos) ? data.photos : []).filter(
+          (p: any) => p && p.type !== "video" && p.urls?.display
+        );
+      } catch {
+        failures.push(`${album.title || album.id}: couldn't load its photos — album skipped.`);
+        setSweep((prev) => (prev ? { ...prev, failures: [...failures] } : prev));
+        continue;
+      }
+
+      setSweep((prev) => (prev ? { ...prev, photoTotal: manifestPhotos.length } : prev));
+
+      let aProcessed = 0;
+      let aSkipped = 0;
+      let aFailed = 0;
+      let aTags = 0;
+      let aUnknown = 0;
+
+      for (let pi = 0; pi < manifestPhotos.length; pi++) {
+        if (sweepCancelRef.current) break;
+        const p = manifestPhotos[pi];
+        try {
+          const r = await autoTagPhoto(
+            String(album.id),
+            String(p.id),
+            String(p.urls.display),
+            String(album.category || cat)
+          );
+          if (!r.configured) {
+            failures.push(
+              "Auto-tag isn't configured (GEMINI_API_KEY missing) — sweep stopped."
+            );
+            stopAll = true;
+            break;
+          }
+          if (r.skipped) {
+            aSkipped += 1;
+          } else if (r.success) {
+            aProcessed += 1;
+            aTags += r.tagsCreated;
+            aUnknown += r.unknownNumbers.length;
+            for (const n of r.unknownNumbers) unknownSet.add(n);
+          } else {
+            aFailed += 1;
+          }
+        } catch {
+          aFailed += 1;
+        }
+        setSweep((prev) =>
+          prev ? { ...prev, photoDone: pi + 1 } : prev
+        );
+      }
+
+      totals.albumsProcessed += 1;
+      totals.photosProcessed += aProcessed;
+      totals.photosSkipped += aSkipped;
+      totals.photosFailed += aFailed;
+      totals.tagsCreated += aTags;
+
+      // Persist this album's own run summary, like the editor button does.
+      if (aProcessed + aFailed > 0) {
+        await finishAutoTagRun(String(album.id), {
+          at: Date.now(),
+          processed: aProcessed,
+          skipped: aSkipped,
+          failed: aFailed,
+          tagsCreated: aTags,
+          unknownNumbers: aUnknown,
+        }).catch(() => {});
+      }
+
+      setSweep((prev) =>
+        prev
+          ? {
+              ...prev,
+              albumsProcessed: totals.albumsProcessed,
+              photosProcessed: totals.photosProcessed,
+              photosSkipped: totals.photosSkipped,
+              photosFailed: totals.photosFailed,
+              tagsCreated: totals.tagsCreated,
+              unknown: [...unknownSet],
+              failures: [...failures],
+            }
+          : prev
+      );
+    }
+
+    setSweep((prev) =>
+      prev
+        ? {
+            ...prev,
+            running: false,
+            done: true,
+            cancelled: sweepCancelRef.current,
+            albumsProcessed: totals.albumsProcessed,
+            photosProcessed: totals.photosProcessed,
+            photosSkipped: totals.photosSkipped,
+            photosFailed: totals.photosFailed,
+            tagsCreated: totals.tagsCreated,
+            unknown: [...unknownSet],
+            failures: [...failures],
+          }
+        : prev
+    );
   };
 
   if (isAuthenticated === null) {
@@ -1484,6 +1703,107 @@ export default function AdminStudioView() {
                 <span className="text-neutral-300 font-semibold">Save Settings</span>{" "}
                 button at the bottom of this tab.
               </p>
+
+              {/* Phase 2: category auto-tag sweep panel */}
+              {sweep && (
+                <div className="border border-amber-800/50 bg-amber-950/20 rounded-xl p-4 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white flex items-center gap-2">
+                      <Sparkles size={14} className="text-amber-400" />
+                      {sweep.running
+                        ? `Auto-tagging ${sweep.category}…`
+                        : sweep.notConfigured
+                          ? "Auto-tag isn't configured"
+                          : `Auto-tag sweep — ${sweep.category}`}
+                    </p>
+                    {sweep.running ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sweepCancelRef.current = true;
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/70 hover:bg-red-900/70 border border-red-800/60 text-red-200 text-xs font-semibold transition cursor-pointer"
+                      >
+                        <Square size={11} /> Cancel sweep
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setSweep(null)}
+                        className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition cursor-pointer"
+                        aria-label="Dismiss sweep panel"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {sweep.notConfigured ? (
+                    <p className="text-xs text-amber-200/90 leading-relaxed">
+                      Add the <span className="font-mono font-semibold">GEMINI_API_KEY</span>{" "}
+                      environment variable in Vercel to enable jersey-number
+                      reading. Manual tagging works either way.
+                    </p>
+                  ) : (
+                    <>
+                      {sweep.running && (
+                        <>
+                          <p className="text-xs text-neutral-300 font-mono">
+                            Album {Math.min(sweep.albumIdx + 1, sweep.albumTotal)} of{" "}
+                            {sweep.albumTotal}
+                            {sweep.albumTitle ? ` — ${sweep.albumTitle}` : ""}
+                            {sweep.photoTotal > 0
+                              ? ` · photo ${Math.min(sweep.photoDone + 1, sweep.photoTotal)} of ${sweep.photoTotal}`
+                              : " · loading photos…"}
+                          </p>
+                          <div className="h-1.5 rounded-full bg-neutral-800 overflow-hidden">
+                            <div
+                              className="h-full bg-amber-500 transition-all duration-300"
+                              style={{
+                                width: `${
+                                  sweep.albumTotal > 0
+                                    ? Math.round(
+                                        ((sweep.albumIdx +
+                                          (sweep.photoTotal > 0
+                                            ? sweep.photoDone / sweep.photoTotal
+                                            : 0)) /
+                                          sweep.albumTotal) *
+                                          100
+                                      )
+                                    : 0
+                                }%`,
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      {(sweep.done || sweep.running) && (
+                        <p className="text-[11px] text-neutral-400 font-mono leading-relaxed">
+                          {sweep.albumsProcessed} albums visited · {sweep.photosProcessed}{" "}
+                          photos read · {sweep.photosSkipped} already-read skipped ·{" "}
+                          {sweep.photosFailed} failed · {sweep.tagsCreated} tags created
+                          {sweep.unknown.length > 0 &&
+                            ` · numbers not on the roster: ${sweep.unknown.join(", ")}`}
+                        </p>
+                      )}
+                      {sweep.done && (
+                        <p className="text-xs text-emerald-300/90">
+                          {sweep.cancelled
+                            ? "Sweep stopped — everything read so far is saved, and re-running picks up where this left off."
+                            : "Sweep complete — everything read is saved per album."}
+                        </p>
+                      )}
+                      {sweep.failures.length > 0 && (
+                        <ul className="text-[11px] text-red-300/90 space-y-0.5">
+                          {sweep.failures.map((f, i) => (
+                            <li key={i}>{f}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               <div className="space-y-4">
                 {siteConfig.categories.map((cat) => {
                   const players = rosterOf(cat);
@@ -1517,6 +1837,23 @@ export default function AdminStudioView() {
                           Describes OUR kit so the auto-tagger reads our numbers
                           and ignores the other team&apos;s. Saves with Save Settings.
                         </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => runCategorySweep(cat)}
+                          disabled={
+                            Boolean(sweep?.running) || albumsInCategory(cat).length === 0
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-md bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition cursor-pointer"
+                        >
+                          <Sparkles size={12} />
+                          Auto-tag all albums in this category ({albumsInCategory(cat).length})
+                        </button>
+                        <span className="text-[11px] text-neutral-500">
+                          Runs album by album; photos already read are skipped.
+                        </span>
                       </div>
 
                       {players.map((p, idx) => (

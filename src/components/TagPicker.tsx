@@ -19,7 +19,9 @@ interface TagPickerProps {
 /**
  * Phase 1 tag picker (spec §3): one tap per player. Tags the visitor made
  * can be removed by them; tags made by others show as tagged but locked
- * (only the tagger or the admin can remove them).
+ * (only the tagger or the admin can remove them). AUTO tags (Phase 2,
+ * from jersey-number reading) are the exception: they're provisional, so
+ * any claimed visitor can remove one that's wrong.
  */
 export default function TagPicker({
   photo,
@@ -38,7 +40,12 @@ export default function TagPicker({
   const handleClick = async (opt: PlayerOption) => {
     const existing = tagFor(opt.key);
     if (busyKey) return;
-    if (existing && existing.taggedByVisitorId !== visitorId) return; // someone else's tag
+    if (
+      existing &&
+      existing.taggedByVisitorId !== visitorId &&
+      existing.source !== "auto"
+    )
+      return; // someone else's manual tag — locked
     setBusyKey(opt.key);
     try {
       await onToggle(opt.key, Boolean(existing));
@@ -86,7 +93,8 @@ export default function TagPicker({
           {options.map((opt) => {
             const existing = tagFor(opt.key);
             const mine = existing?.taggedByVisitorId === visitorId;
-            const locked = Boolean(existing) && !mine;
+            const isAuto = existing?.source === "auto";
+            const locked = Boolean(existing) && !mine && !isAuto;
             const busy = busyKey === opt.key;
             return (
               <button
@@ -96,7 +104,7 @@ export default function TagPicker({
                 onClick={() => handleClick(opt)}
                 className={`w-full flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[44px] rounded-xl border text-xs font-semibold transition ${
                   existing
-                    ? mine
+                    ? mine || isAuto
                       ? "bg-blue-950/70 border-blue-700/70 text-blue-100 cursor-pointer"
                       : "bg-neutral-900 border-neutral-800 text-neutral-400 cursor-not-allowed"
                     : "bg-neutral-900 border-neutral-800 text-neutral-200 hover:border-neutral-600 hover:text-white cursor-pointer"
@@ -109,14 +117,19 @@ export default function TagPicker({
                       Yours
                     </span>
                   )}
+                  {isAuto && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-900/80 text-amber-200 border border-amber-800 shrink-0">
+                      Auto
+                    </span>
+                  )}
                 </span>
                 <span className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
                   {busy ? (
                     <Loader2 size={13} className="animate-spin" />
                   ) : existing ? (
                     <>
-                      <Check size={13} className={mine ? "text-blue-300" : "text-neutral-500"} />
-                      <span>{mine ? "Tagged by you" : "Tagged"}</span>
+                      <Check size={13} className={mine || isAuto ? "text-blue-300" : "text-neutral-500"} />
+                      <span>{mine ? "Tagged by you" : isAuto ? "Auto tag" : "Tagged"}</span>
                     </>
                   ) : (
                     <>
@@ -131,8 +144,9 @@ export default function TagPicker({
         </div>
 
         <p className="text-[11px] text-neutral-500 leading-relaxed">
-          Tags are added by people, never automatically. Tap a player you tagged
-          to remove your tag.
+          Tap a player to tag them; tap a tag you made to remove it.{" "}
+          <span className="text-amber-300/80">Auto</span> tags come from
+          jersey-number reading — anyone can remove one that&apos;s wrong.
         </p>
       </div>
     </div>

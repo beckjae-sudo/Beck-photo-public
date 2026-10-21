@@ -1,70 +1,30 @@
 "use server";
 
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  readTagsFile,
+  writeTagsFile,
+  tagSource,
+  tagsStorageConfigured,
+  TagRecord,
+} from "@/lib/tagsStore";
 
 /**
- * Phase 1 player tags (spec §3). Human-made only — no automated tagging.
- * Stored at `{albumId}/tags.json` next to visitors.json, deliberately NOT
- * inside manifest.json so tagging never rewrites album data.
+ * Phase 1 player tags (spec §3). Human-made tags plus, since Phase 2,
+ * machine-made "auto" tags from jersey-number reading — never face
+ * recognition. Stored at `{albumId}/tags.json` (see lib/tagsStore.ts),
+ * deliberately NOT inside manifest.json so tagging never rewrites
+ * album data.
  */
-export interface TagRecord {
-  photoId: string;
-  playerKey: string;
-  taggedByVisitorId: string;
-  createdAt: number;
-}
-
-const s3 = new S3Client({
-  region: "auto",
-  endpoint: process.env.R2_ENDPOINT || "",
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
-  },
-});
-
-const BUCKET = process.env.R2_BUCKET_NAME || "";
-
-async function readTags(albumId: string): Promise<TagRecord[]> {
-  try {
-    const res = await s3.send(
-      new GetObjectCommand({ Bucket: BUCKET, Key: `${albumId}/tags.json` })
-    );
-    const data = await res.Body?.transformToString();
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-    // no tags yet
-  }
-  return [];
-}
-
-async function writeTags(albumId: string, tags: TagRecord[]): Promise<boolean> {
-  try {
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: BUCKET,
-        Key: `${albumId}/tags.json`,
-        Body: JSON.stringify(tags, null, 2),
-        ContentType: "application/json",
-        CacheControl: "no-cache",
-      })
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
+export type { TagRecord };
 
 /** Public read: tags are photo metadata (player chips), shown to everyone.
  *  They carry pseudonymous visitor ids only — never names. */
 export async function getAlbumTags(
   albumId: string
 ): Promise<{ success: boolean; tags: TagRecord[] }> {
-  if (!BUCKET || !process.env.R2_ENDPOINT) return { success: false, tags: [] };
-  return { success: true, tags: await readTags(albumId) };
+  if (!tagsStorageConfigured()) return { success: false, tags: [] };
+  const data = await readTagsFile(albumId);
+  return { success: true, tags: data.tags };
 }
 
 /* Cheap per-visitor rate limit for tag creation (spec §3: ~60/min).
@@ -93,7 +53,7 @@ export async function addAlbumTag(
   albumId: string,
   tag: { photoId: string; playerKey: string; visitorId: string }
 ): Promise<{ success: boolean; tags: TagRecord[]; error?: string }> {
-  if (!BUCKET || !process.env.R2_ENDPOINT) {
+  if (!tagsStorageConfigured()) {
     return { success: false, tags: [], error: "Tagging is unavailable." };
   }
   const photoId = String(tag?.photoId || "").trim();
@@ -110,40 +70,77 @@ export async function addAlbumTag(
     };
   }
 
-  const tags = await readTags(albumId);
+  const data = await readTagsFile(albumId);
   // One record per (photo, player); a duplicate add is a no-op success.
-  if (tags.some((t) => t.photoId === photoId && t.playerKey === playerKey)) {
-    return { success: true, tags };
+  if (data.tags.some((t) => t.photoId === photoId && t.playerKey === playerKey)) {
+    return { success: true, tags: data.tags };
   }
 
   noteAdd(visitorId);
-  tags.push({ photoId, playerKey, taggedByVisitorId: visitorId, createdAt: Date.now() });
-  const ok = await writeTags(albumId, tags);
-  return { success: ok, tags, error: ok ? undefined : "Could not save the tag." };
+  data.tags.push({
+    photoId,
+    playerKey,
+    taggedByVisitorId: visitorId,
+    createdAt: Date.now(),
+    source: "manual",
+  });
+  const ok = await writeTagsFile(albumId, data);
+  return { success: ok, tags: data.tags, error: ok ? undefined : "Could not save the tag." };
 }
 
-/** A visitor can remove only tags they made themselves (spec §3).
- *  The admin path (adminRemoveAlbumTag) can remove any tag. */
+/** A visitor can remove only manual tags they made themselves (spec §3).
+ *  The admin path (adminRemoveAlbumTag) can remove any tag, and
+ *  removeAutoTag below covers machine-made tags. */
 export async function removeAlbumTag(
   albumId: string,
   tag: { photoId: string; playerKey: string; visitorId: string }
 ): Promise<{ success: boolean; tags: TagRecord[] }> {
-  if (!BUCKET || !process.env.R2_ENDPOINT) return { success: false, tags: [] };
+  if (!tagsStorageConfigured()) return { success: false, tags: [] };
   const photoId = String(tag?.photoId || "").trim();
   const playerKey = String(tag?.playerKey || "").trim();
   const visitorId = String(tag?.visitorId || "").trim();
   if (!photoId || !playerKey || !visitorId) return { success: false, tags: [] };
 
-  const tags = await readTags(albumId);
-  const next = tags.filter(
+  const data = await readTagsFile(albumId);
+  const next = data.tags.filter(
     (t) =>
       !(
         t.photoId === photoId &&
         t.playerKey === playerKey &&
-        t.taggedByVisitorId === visitorId
+        t.taggedByVisitorId === visitorId &&
+        tagSource(t) === "manual"
       )
   );
-  if (next.length === tags.length) return { success: true, tags };
-  const ok = await writeTags(albumId, next);
+  if (next.length === data.tags.length) return { success: true, tags: data.tags };
+  data.tags = next;
+  const ok = await writeTagsFile(albumId, data);
+  return { success: ok, tags: next };
+}
+
+/** Any claimed visitor may remove an AUTO tag (Phase 2): machine tags are
+ *  provisional until a person confirms them, so correcting one is open to
+ *  every claimed viewer — the "Not #12" fix. Manual tags never match here. */
+export async function removeAutoTag(
+  albumId: string,
+  tag: { photoId: string; playerKey: string; visitorId: string }
+): Promise<{ success: boolean; tags: TagRecord[] }> {
+  if (!tagsStorageConfigured()) return { success: false, tags: [] };
+  const photoId = String(tag?.photoId || "").trim();
+  const playerKey = String(tag?.playerKey || "").trim();
+  const visitorId = String(tag?.visitorId || "").trim();
+  if (!photoId || !playerKey || !visitorId) return { success: false, tags: [] };
+
+  const data = await readTagsFile(albumId);
+  const next = data.tags.filter(
+    (t) =>
+      !(
+        t.photoId === photoId &&
+        t.playerKey === playerKey &&
+        tagSource(t) === "auto"
+      )
+  );
+  if (next.length === data.tags.length) return { success: true, tags: data.tags };
+  data.tags = next;
+  const ok = await writeTagsFile(albumId, data);
   return { success: ok, tags: next };
 }

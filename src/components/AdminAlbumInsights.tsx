@@ -12,10 +12,12 @@ import {
   Sparkles,
   Square,
   Eraser,
+  Layers,
 } from "lucide-react";
 import {
   adminRemoveAlbumTag,
   autoTagPhoto,
+  burstFillAlbum,
   clearAutoTags,
   finishAutoTagRun,
   getAlbumAudience,
@@ -56,7 +58,7 @@ interface AudienceTag {
   playerKey: string;
   taggedByVisitorId: string;
   createdAt: number;
-  source?: "manual" | "auto";
+  source?: "manual" | "auto" | "burst";
 }
 
 interface AutoTagRunSummaryState {
@@ -111,6 +113,13 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     firstError: string;
   } | null>(null);
   const [clearBusy, setClearBusy] = useState(false);
+  const [burstBusy, setBurstBusy] = useState(false);
+  const [burstResult, setBurstResult] = useState<{
+    tagsAdded: number;
+    photosFilled: number;
+    playersInvolved: number;
+  } | null>(null);
+  const [burstError, setBurstError] = useState("");
   const cancelAutoRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -227,10 +236,35 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     () => tags.filter((t) => t.source === "auto").length,
     [tags]
   );
+  const burstTagCount = useMemo(
+    () => tags.filter((t) => t.source === "burst").length,
+    [tags]
+  );
   const autoRemaining = useMemo(() => {
     const done = new Set(autoProcessedIds);
     return imagePhotos.filter((p) => !done.has(p.id)).length;
   }, [imagePhotos, autoProcessedIds]);
+
+  const handleBurstFill = async () => {
+    if (burstBusy || autoRunning) return;
+    setBurstBusy(true);
+    setBurstResult(null);
+    setBurstError("");
+    try {
+      const res = await burstFillAlbum(albumId);
+      if (!res.success) throw new Error(res.error || "Burst fill failed.");
+      setBurstResult({
+        tagsAdded: res.tagsAdded,
+        photosFilled: res.photosFilled,
+        playersInvolved: res.playersInvolved,
+      });
+      await load();
+    } catch (e: any) {
+      setBurstError(e?.message || "Burst fill failed.");
+    } finally {
+      setBurstBusy(false);
+    }
+  };
 
   /** Browser-driven run: one server action per photo (the site's
    *  upload-loop pattern), tolerating per-photo failures, cancellable,
@@ -378,7 +412,7 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
           </h3>
           <span className="text-[11px] font-mono text-neutral-500">
             {imagePhotos.length - autoRemaining} of {imagePhotos.length} photos read ·{" "}
-            {autoTagCount} auto tags
+            {autoTagCount} auto tags · {burstTagCount} burst tags
           </span>
         </div>
 
@@ -393,10 +427,12 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
           <>
             <p className="text-[11px] text-neutral-500 leading-relaxed">
               Reads each photo&apos;s jersey numbers with Gemini and tags the
-              roster players it finds. It uses this team&apos;s &quot;Team
-              look&quot; text (Site Design → Team Rosters) to ignore the other
-              team. Auto tags are live immediately; any claimed visitor can
-              remove a wrong one, and you can clear them all below.
+              roster players it finds. It uses this album&apos;s &quot;Team
+              look&quot; when one is set; otherwise it falls back to the
+              category&apos;s Team look text (Site Design → Team Rosters) to
+              ignore the other team. Auto tags are live immediately; any
+              claimed visitor can remove a wrong one, and you can clear them
+              all below.
             </p>
 
             {lastAutoRun && !autoResult && (
@@ -494,6 +530,50 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
             </div>
           </>
         )}
+
+        <div className="space-y-2 border-t border-neutral-800 pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
+              <Layers size={13} className="text-emerald-400" />
+              Burst fill — sequence gaps
+            </h4>
+            <span className="text-[11px] font-mono text-neutral-500">
+              Free · uses existing tags only
+            </span>
+          </div>
+          <p className="text-[11px] text-neutral-500 leading-relaxed">
+            Fills short untagged gaps between photos of the same player and
+            spreads each player&apos;s tag across tight bursts (frames no more
+            than 3 seconds apart, 30 seconds end to end). It only adds Burst
+            tags; existing tags are never changed.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleBurstFill}
+              disabled={burstBusy || autoRunning || loading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition cursor-pointer"
+            >
+              {burstBusy ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Layers size={13} />
+              )}
+              Fill gaps across bursts
+            </button>
+            {burstResult && (
+              <span className="text-[11px] text-emerald-300/90 font-mono leading-relaxed">
+                Added {burstResult.tagsAdded} tags · filled {burstResult.photosFilled}{" "}
+                photos · {burstResult.playersInvolved} players involved
+              </span>
+            )}
+          </div>
+          {burstError && (
+            <p className="text-[11px] text-red-400 font-mono leading-relaxed">
+              Burst fill error: {burstError}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Per-player rollups */}
@@ -629,20 +709,33 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
                         const tagger = visitorById.get(t.taggedByVisitorId);
                         const busyId = `${photoId}|${t.playerKey}`;
                         const isAuto = t.source === "auto";
+                        const isBurst = t.source === "burst";
                         return (
                           <span
                             key={t.playerKey}
                             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[11px] font-semibold ${
                               isAuto
                                 ? "bg-amber-950/70 border-amber-800/60 text-amber-100"
-                                : "bg-blue-950/70 border-blue-800/60 text-blue-100"
+                                : isBurst
+                                  ? "bg-emerald-950/70 border-emerald-800/60 text-emerald-100"
+                                  : "bg-blue-950/70 border-blue-800/60 text-blue-100"
                             }`}
                           >
                             {playerKeyLabel(t.playerKey, rosters)}
-                            <span className={isAuto ? "text-amber-300/60 font-normal" : "text-blue-300/60 font-normal"}>
+                            <span
+                              className={
+                                isAuto
+                                  ? "text-amber-300/60 font-normal"
+                                  : isBurst
+                                    ? "text-emerald-300/60 font-normal"
+                                    : "text-blue-300/60 font-normal"
+                              }
+                            >
                               {isAuto
                                 ? "by Auto-tag"
-                                : `by ${tagger?.claim?.displayName || tagger?.name || "a visitor"}`}
+                                : isBurst
+                                  ? "by Burst"
+                                  : `by ${tagger?.claim?.displayName || tagger?.name || "a visitor"}`}
                             </span>
                             <button
                               type="button"

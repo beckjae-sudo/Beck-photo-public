@@ -47,6 +47,7 @@ interface AlbumData {
   title: string;
   date: string;
   category?: string;
+  teamLook?: string;
   cover_url: string;
   photos: Photo[];
 }
@@ -77,6 +78,8 @@ export default function EditAlbumView() {
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [category, setCategory] = useState("");
+  const [teamLook, setTeamLook] = useState("");
+  const [teamDescriptions, setTeamDescriptions] = useState<Record<string, string>>({});
   const [siteCategories, setSiteCategories] = useState<string[]>([]);
   const [coverUrl, setCoverUrl] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -119,6 +122,7 @@ export default function EditAlbumView() {
         setTitle(data.title || "");
         setDate(data.date || "");
         setCategory(data.category || "");
+        setTeamLook(data.teamLook || "");
         setCoverUrl(data.cover_url || data.photos?.[0]?.urls?.thumb || "");
         setPhotos(data.photos || []);
 
@@ -137,6 +141,14 @@ export default function EditAlbumView() {
                   .map((c: any) => String(c || "").trim())
                   .filter(Boolean)
               );
+            }
+            if (cfg?.team_descriptions && typeof cfg.team_descriptions === "object") {
+              const descriptions: Record<string, string> = {};
+              for (const [cat, text] of Object.entries(cfg.team_descriptions)) {
+                const value = String(text || "").trim();
+                if (value) descriptions[cat] = value;
+              }
+              setTeamDescriptions(descriptions);
             }
           }
         } catch {
@@ -325,6 +337,7 @@ export default function EditAlbumView() {
         title,
         date,
         category,
+        teamLook: teamLook.trim(),
         cover_url: finalCoverUrl,
         photos: allPhotos,
       };
@@ -342,6 +355,15 @@ export default function EditAlbumView() {
       setUploadProgressText("");
     }
   };
+
+  const categoryTeamLook = (() => {
+    const target = category.trim().toLowerCase();
+    if (!target) return "";
+    const entry = Object.entries(teamDescriptions).find(
+      ([cat]) => cat.trim().toLowerCase() === target
+    );
+    return entry?.[1] || "";
+  })();
 
   if (loading) {
     return (
@@ -451,6 +473,36 @@ export default function EditAlbumView() {
               <p className="text-[11px] text-amber-400">
                 The site&apos;s category list couldn&apos;t be loaded. Reload the page
                 before changing this album&apos;s category.
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5 md:col-span-3">
+            <label
+              htmlFor="album-team-look"
+              className="text-xs font-medium text-neutral-400"
+            >
+              Team look for this album
+            </label>
+            <textarea
+              id="album-team-look"
+              value={teamLook}
+              onChange={(e) => setTeamLook(e.target.value)}
+              placeholder={
+                categoryTeamLook ||
+                "e.g. Navy jerseys with white numbers, navy shorts"
+              }
+              rows={3}
+              maxLength={200}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 resize-y"
+            />
+            <p className="text-[11px] text-neutral-500 leading-relaxed">
+              Optional. This overrides the category description when auto-tagging
+              reads jersey numbers in this album — use it when this game used the
+              other kit (home vs. away).
+            </p>
+            {!teamLook.trim() && categoryTeamLook && (
+              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                Category fallback: {categoryTeamLook}
               </p>
             )}
           </div>

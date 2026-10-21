@@ -496,8 +496,8 @@ export default function EditAlbumView() {
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:border-blue-500 resize-y"
             />
             <p className="text-[11px] text-neutral-500 leading-relaxed">
-              Optional. This overrides the category description when auto-tagging
-              reads jersey numbers in this album — use it when this game used the
+              Optional. Describes your kit in this game for tagging help —
+              it overrides the category description. Use it when this game used the
               other kit (home vs. away).
             </p>
             {!teamLook.trim() && categoryTeamLook && (

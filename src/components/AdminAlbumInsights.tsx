@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Users,
   RefreshCw,
@@ -9,17 +9,13 @@ import {
   Tag,
   Download,
   Eye,
-  Sparkles,
-  Square,
   Eraser,
   Layers,
 } from "lucide-react";
 import {
   adminRemoveAlbumTag,
-  autoTagPhoto,
   burstFillAlbum,
   clearAutoTags,
-  finishAutoTagRun,
   getAlbumAudience,
 } from "@/app/admin/actions";
 import { playerKeyLabel, rosterForCategory } from "@/lib/players";
@@ -61,14 +57,6 @@ interface AudienceTag {
   source?: "manual" | "auto" | "burst";
 }
 
-interface AutoTagRunSummaryState {
-  at: number;
-  processed: number;
-  skipped: number;
-  failed: number;
-  tagsCreated: number;
-  unknownNumbers: number;
-}
 
 function fmtWhen(ts: number): string {
   try {
@@ -97,21 +85,6 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
   const [error, setError] = useState("");
   const [removingKey, setRemovingKey] = useState<string | null>(null);
 
-  // ---- Phase 2 auto-tag state ----
-  const [autoProcessedIds, setAutoProcessedIds] = useState<string[]>([]);
-  const [lastAutoRun, setLastAutoRun] = useState<AutoTagRunSummaryState | null>(null);
-  const [geminiConfigured, setGeminiConfigured] = useState(true);
-  const [autoRunning, setAutoRunning] = useState(false);
-  const [autoProgress, setAutoProgress] = useState({ done: 0, total: 0 });
-  const [autoResult, setAutoResult] = useState<{
-    processed: number;
-    skipped: number;
-    failed: number;
-    tagsCreated: number;
-    unknown: string[];
-    cancelled: boolean;
-    firstError: string;
-  } | null>(null);
   const [clearBusy, setClearBusy] = useState(false);
   const [burstBusy, setBurstBusy] = useState(false);
   const [burstResult, setBurstResult] = useState<{
@@ -120,7 +93,6 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     playersInvolved: number;
   } | null>(null);
   const [burstError, setBurstError] = useState("");
-  const cancelAutoRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,9 +102,6 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
       if (!res.success) throw new Error(res.error || "Could not load audience.");
       setVisitors(res.visitors as AudienceVisitor[]);
       setTags(res.tags as AudienceTag[]);
-      setAutoProcessedIds(res.autoProcessedPhotoIds || []);
-      setLastAutoRun(res.lastAutoTagRun || null);
-      setGeminiConfigured(Boolean(res.geminiConfigured));
     } catch (e: any) {
       setError(e?.message || "Could not load audience.");
     } finally {
@@ -227,7 +196,6 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     }
   };
 
-  // ---- Phase 2 auto-tag derived state ----
   const imagePhotos = useMemo(
     () => photos.filter((p) => p.type !== "video" && p.urls?.display),
     [photos]
@@ -240,13 +208,8 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     () => tags.filter((t) => t.source === "burst").length,
     [tags]
   );
-  const autoRemaining = useMemo(() => {
-    const done = new Set(autoProcessedIds);
-    return imagePhotos.filter((p) => !done.has(p.id)).length;
-  }, [imagePhotos, autoProcessedIds]);
-
   const handleBurstFill = async () => {
-    if (burstBusy || autoRunning) return;
+    if (burstBusy) return;
     setBurstBusy(true);
     setBurstResult(null);
     setBurstError("");
@@ -266,84 +229,11 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     }
   };
 
-  /** Browser-driven run: one server action per photo (the site's
-   *  upload-loop pattern), tolerating per-photo failures, cancellable,
-   *  and resumable — already-processed photos are skipped because the
-   *  server persists their ids in tags.json as it goes. */
-  const runAutoTag = async () => {
-    if (autoRunning || !geminiConfigured) return;
-    const doneSet = new Set(autoProcessedIds);
-    const candidates = imagePhotos.filter((p) => !doneSet.has(p.id));
-    if (candidates.length === 0) return;
-    const skippedCount = imagePhotos.length - candidates.length;
-
-    cancelAutoRef.current = false;
-    setAutoRunning(true);
-    setAutoResult(null);
-    setAutoProgress({ done: 0, total: candidates.length });
-
-    let processed = 0;
-    let failed = 0;
-    let tagsCreated = 0;
-    let unknownCount = 0;
-    let firstError = "";
-    const unknownSet = new Set<string>();
-    let notConfigured = false;
-
-    for (const p of candidates) {
-      if (cancelAutoRef.current) break;
-      try {
-        const res = await autoTagPhoto(albumId, p.id, p.urls?.display || "", category);
-        if (!res.configured) {
-          notConfigured = true;
-          break;
-        }
-        if (res.success) {
-          processed += 1;
-          tagsCreated += res.tagsCreated;
-          unknownCount += res.unknownNumbers.length;
-          for (const n of res.unknownNumbers) unknownSet.add(n);
-        } else {
-          failed += 1;
-          if (!firstError && res.error) firstError = res.error;
-        }
-      } catch {
-        failed += 1;
-        if (!firstError)
-          firstError = "The auto-tag request itself failed before the server answered.";
-      }
-      setAutoProgress({ done: processed + failed, total: candidates.length });
-    }
-
-    if (notConfigured) setGeminiConfigured(false);
-    if (processed + failed > 0) {
-      await finishAutoTagRun(albumId, {
-        at: Date.now(),
-        processed,
-        skipped: skippedCount,
-        failed,
-        tagsCreated,
-        unknownNumbers: unknownCount,
-      }).catch(() => {});
-      setAutoResult({
-        processed,
-        skipped: skippedCount,
-        failed,
-        tagsCreated,
-        unknown: [...unknownSet],
-        cancelled: cancelAutoRef.current,
-        firstError,
-      });
-    }
-    setAutoRunning(false);
-    await load();
-  };
-
   const handleClearAutoTags = async () => {
-    if (clearBusy || autoRunning) return;
+    if (clearBusy) return;
     if (
       !window.confirm(
-        "Remove all auto (machine-made) tags from this album?\n\nHuman tags stay untouched, and auto-tag can be re-run from scratch afterwards."
+        "Remove all auto (machine-made) tags from this album?\n\nManual and burst tags stay untouched."
       )
     )
       return;
@@ -351,7 +241,6 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     try {
       const res = await clearAutoTags(albumId);
       if (res.success) {
-        setAutoResult(null);
         await load();
       }
     } finally {
@@ -403,132 +292,40 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
         ))}
       </div>
 
-      {/* Phase 2: auto-tag (Gemini jersey-number reading) */}
+      {/* Tagging tools: burst fill (free) + cleanup of past machine tags.
+          The Gemini auto-tag reader was removed 2026-10-21 (per-call cost
+          wasn't sustainable); existing auto tags stay until cleared. */}
       <div className="space-y-3 p-4 bg-neutral-950/70 border border-neutral-800 rounded-xl">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
-            <Sparkles size={13} className="text-amber-400" />
-            Auto-tag — jersey numbers
+            <Layers size={13} className="text-emerald-400" />
+            Tagging tools
           </h3>
           <span className="text-[11px] font-mono text-neutral-500">
-            {imagePhotos.length - autoRemaining} of {imagePhotos.length} photos read ·{" "}
             {autoTagCount} auto tags · {burstTagCount} burst tags
           </span>
         </div>
 
-        {!geminiConfigured ? (
-          <p className="text-xs text-amber-200/90 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2.5 leading-relaxed">
-            Auto-tag isn&apos;t configured — add the{" "}
-            <span className="font-mono font-semibold">GEMINI_API_KEY</span>{" "}
-            environment variable in Vercel to enable jersey-number reading.
-            Manual tagging works either way.
-          </p>
-        ) : (
-          <>
-            <p className="text-[11px] text-neutral-500 leading-relaxed">
-              Reads each photo&apos;s jersey numbers with Gemini and tags the
-              roster players it finds. It uses this album&apos;s &quot;Team
-              look&quot; when one is set; otherwise it falls back to the
-              category&apos;s Team look text (Site Design → Team Rosters) to
-              ignore the other team. Auto tags are live immediately; any
-              claimed visitor can remove a wrong one, and you can clear them
-              all below.
-            </p>
-
-            {lastAutoRun && !autoResult && (
-              <p className="text-[11px] text-neutral-400 font-mono">
-                Last run {fmtWhen(lastAutoRun.at)}: read {lastAutoRun.processed} · skipped{" "}
-                {lastAutoRun.skipped} · failed {lastAutoRun.failed} · created{" "}
-                {lastAutoRun.tagsCreated} tags · {lastAutoRun.unknownNumbers} unknown
-                numbers
-              </p>
-            )}
-
-            {autoResult && (
-              <p className="text-[11px] text-emerald-300/90 font-mono leading-relaxed">
-                {autoResult.cancelled ? "Run stopped. " : "Run complete. "}
-                Read {autoResult.processed} photos · skipped {autoResult.skipped}{" "}
-                already-read · failed {autoResult.failed} · created{" "}
-                {autoResult.tagsCreated} tags
-                {autoResult.unknown.length > 0 &&
-                  ` · numbers not on the roster: ${autoResult.unknown.join(", ")}`}
-              </p>
-            )}
-
-            {autoResult?.firstError && (
-              <p className="text-[11px] text-red-400 font-mono leading-relaxed">
-                First error: {autoResult.firstError}
-              </p>
-            )}
-
-            {autoRunning && (
-              <div className="space-y-1.5">
-                <div className="h-1.5 rounded-full bg-neutral-800 overflow-hidden">
-                  <div
-                    className="h-full bg-amber-500 transition-all duration-300"
-                    style={{
-                      width: `${
-                        autoProgress.total > 0
-                          ? Math.round((autoProgress.done / autoProgress.total) * 100)
-                          : 0
-                      }%`,
-                    }}
-                  />
-                </div>
-                <p className="text-[11px] text-neutral-400 font-mono">
-                  Reading photo {Math.min(autoProgress.done + 1, autoProgress.total)} of{" "}
-                  {autoProgress.total}…
-                </p>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2">
-              {autoRunning ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    cancelAutoRef.current = true;
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] rounded-lg bg-red-950/70 hover:bg-red-900/70 border border-red-800/60 text-red-200 text-xs font-semibold transition cursor-pointer"
-                >
-                  <Square size={12} />
-                  Cancel run
-                </button>
+        {autoTagCount > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleClearAutoTags}
+              disabled={clearBusy}
+              className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-lg bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-300 text-xs font-semibold transition cursor-pointer"
+            >
+              {clearBusy ? (
+                <Loader2 size={12} className="animate-spin" />
               ) : (
-                <button
-                  type="button"
-                  onClick={runAutoTag}
-                  disabled={autoRemaining === 0 || loading}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition cursor-pointer"
-                >
-                  <Sparkles size={13} />
-                  {autoRemaining === imagePhotos.length
-                    ? "Auto-tag this album"
-                    : `Auto-tag remaining photos (${autoRemaining})`}
-                </button>
+                <Eraser size={12} />
               )}
-              {autoTagCount > 0 && !autoRunning && (
-                <button
-                  type="button"
-                  onClick={handleClearAutoTags}
-                  disabled={clearBusy}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-lg bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-300 text-xs font-semibold transition cursor-pointer"
-                >
-                  {clearBusy ? (
-                    <Loader2 size={12} className="animate-spin" />
-                  ) : (
-                    <Eraser size={12} />
-                  )}
-                  Clear auto tags ({autoTagCount})
-                </button>
-              )}
-              {autoRemaining === 0 && imagePhotos.length > 0 && !autoRunning && (
-                <span className="text-[11px] text-neutral-500">
-                  Every photo has been read. Clear auto tags to re-run from scratch.
-                </span>
-              )}
-            </div>
-          </>
+              Clear auto tags ({autoTagCount})
+            </button>
+            <span className="text-[11px] text-neutral-500">
+              Removes the tags the retired Gemini reader created. Manual and
+              burst tags are kept.
+            </span>
+          </div>
         )}
 
         <div className="space-y-2 border-t border-neutral-800 pt-3">
@@ -551,7 +348,7 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
             <button
               type="button"
               onClick={handleBurstFill}
-              disabled={burstBusy || autoRunning || loading}
+              disabled={burstBusy || loading}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition cursor-pointer"
             >
               {burstBusy ? (

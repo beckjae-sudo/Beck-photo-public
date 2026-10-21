@@ -1,75 +1,109 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getOrCreateVisitorProfile,
+  onVisitorProfileChange,
+  removeVisitorClaim,
   updateVisitorName,
   VisitorProfile,
 } from "@/lib/visitorIdentity";
-import { logAlbumPresence, getAlbumPresence, VisitorRecord } from "@/app/actions/presence";
-import { Edit3, X, Users, Check, Clock, History, Eye } from "lucide-react";
+import { ClaimSnapshot, logAlbumPresence } from "@/app/actions/presence";
+import { playerKeyLabel } from "@/lib/players";
+import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
+import { Edit3, X, Check, Trash2, UserRound } from "lucide-react";
 
 interface ViewerPresenceBadgeProps {
   albumId: string;
+  /** Opens the claim flow (owned by the album view). */
+  onOpenClaim?: () => void;
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const diff = Math.floor((Date.now() - timestamp) / 1000);
-  if (diff < 60) return "Just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+function claimSnapshotFor(profile: VisitorProfile): ClaimSnapshot | null {
+  const claims = profile.claims || [];
+  if (claims.length === 0) return null;
+  return {
+    players: claims.map((c) => c.playerKey),
+    relation: claims[0]?.relation ?? null,
+    displayName: profile.name,
+  };
 }
 
-export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProps) {
+/**
+ * Phase 1 presence badge — PERSONAL ONLY (spec §5, Jae's decision §10).
+ * A visitor sees their own identity/claim state and nothing about anyone
+ * else. The full audience list exists only in the admin. Presence is still
+ * logged per album (now with the claim snapshot + the caller's own record
+ * is the only thing the action returns).
+ */
+export default function ViewerPresenceBadge({ albumId, onOpenClaim }: ViewerPresenceBadgeProps) {
   const [profile, setProfile] = useState<VisitorProfile | null>(null);
-  const [visitors, setVisitors] = useState<VisitorRecord[]>([]);
+  const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(DEFAULT_PUBLIC_CONFIG);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
   const [inputName, setInputName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const lastLoggedSignature = useRef<string>("");
+
+  // Roster labels for claim display
+  useEffect(() => {
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
+    if (!baseUrl) return;
+    fetch(`${baseUrl}/site_config_public.json`, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (cfg) setSiteConfig({ ...DEFAULT_PUBLIC_CONFIG, ...cfg });
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const current = getOrCreateVisitorProfile();
     setProfile(current);
     setInputName(current.name || "");
-
-    const displayName = current.name || `Sideline ${current.avatarAnimal}`;
-
-    getAlbumPresence(albumId).then((res) => {
-      if (res.visitors) setVisitors(res.visitors);
+    return onVisitorProfileChange((next) => {
+      setProfile(next);
+      setInputName(next.name || "");
     });
+  }, []);
+
+  // Log presence on mount and whenever the identity/claim changes.
+  // (A claim save re-logs so the admin audience view picks it up; like the
+  // old name-save, this also refreshes lastSeen.)
+  useEffect(() => {
+    if (!profile) return;
+    const snapshot = claimSnapshotFor(profile);
+    const signature = JSON.stringify({
+      id: profile.id,
+      name: profile.name,
+      emoji: profile.avatarEmoji,
+      snapshot,
+    });
+    if (lastLoggedSignature.current === `${albumId}|${signature}`) return;
+    lastLoggedSignature.current = `${albumId}|${signature}`;
 
     logAlbumPresence(albumId, {
-      id: current.id,
-      name: displayName,
-      emoji: current.avatarEmoji,
-      color: current.avatarColor,
-      isCustomName: current.isCustomName,
-    }).then((res) => {
-      if (res.visitors) setVisitors(res.visitors);
-    });
-  }, [albumId]);
+      id: profile.id,
+      name: profile.name || `Sideline ${profile.avatarAnimal}`,
+      emoji: profile.avatarEmoji,
+      color: profile.avatarColor,
+      isCustomName: profile.isCustomName,
+      claim: snapshot,
+    }).catch(() => {});
+  }, [albumId, profile]);
+
+  const claims = useMemo(() => profile?.claims || [], [profile]);
+
+  const claimSummary = useMemo(() => {
+    if (claims.length === 0) return null;
+    const first = playerKeyLabel(claims[0].playerKey, siteConfig.rosters);
+    return claims.length === 1 ? `Here for ${first}` : `Here for ${first} +${claims.length - 1}`;
+  }, [claims, siteConfig.rosters]);
 
   const handleSaveName = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-
     const updated = updateVisitorName(inputName);
     setProfile(updated);
-
-    const displayName = updated.name || `Sideline ${updated.avatarAnimal}`;
-
-    const res = await logAlbumPresence(albumId, {
-      id: updated.id,
-      name: displayName,
-      emoji: updated.avatarEmoji,
-      color: updated.avatarColor,
-      isCustomName: updated.isCustomName,
-    });
-
-    if (res.visitors) setVisitors(res.visitors);
-
     setIsSaving(false);
     setIsEditModalOpen(false);
   };
@@ -78,192 +112,44 @@ export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProp
 
   const currentDisplayName = profile.name || `Sideline ${profile.avatarAnimal}`;
 
-  // Viewers active within the last 5 minutes
-  const activeNowCount = visitors.filter(
-    (v) => Date.now() - v.lastSeen < 5 * 60 * 1000
-  ).length;
-
   return (
     <>
       <div className="flex flex-wrap items-center gap-2.5">
-        {/* User's Profile Pill */}
+        {/* Personal identity pill — the ONLY presence UI visitors get. */}
         <button
           onClick={() => setIsEditModalOpen(true)}
           className="group inline-flex items-center gap-2 px-3 py-2 rounded-full bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 transition cursor-pointer shadow-sm text-xs"
-          title="Click to change your screen name"
+          title="Your identity on this device"
         >
           <span className="flex items-center justify-center w-5 h-5 rounded-full bg-neutral-800 text-[11px] border border-white/10">
             {profile.avatarEmoji}
           </span>
           <span className="font-medium text-neutral-200 group-hover:text-white">
-            {currentDisplayName}{" "}
+            {profile.name || claimSummary || currentDisplayName}{" "}
             <span className="text-[10px] text-neutral-500 font-mono">(You)</span>
           </span>
           <span className="text-[11px] text-blue-400 font-mono flex items-center gap-1 pl-1 border-l border-neutral-800 group-hover:underline">
             <Edit3 size={11} />
-            {profile.isCustomName ? "Edit" : "Say Hi"}
+            {profile.isCustomName || claims.length > 0 ? "Edit" : "Say Hi"}
           </span>
         </button>
 
-        {/* Clickable Audience Counter & Avatar Stack */}
-        {visitors.length > 0 && (
-          <button
-            onClick={() => setIsAudienceModalOpen(true)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-neutral-900/60 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-xs text-neutral-400 hover:text-white transition cursor-pointer"
-            title="Click to view full audience roster and name histories"
-          >
-            <div className="flex -space-x-1.5 overflow-hidden p-0.5">
-              {visitors.slice(0, 4).map((v) => (
-                <div
-                  key={v.id}
-                  className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-neutral-800 border-2 border-neutral-950 text-[10px] shadow-sm"
-                >
-                  {v.emoji || "👤"}
-                </div>
-              ))}
-            </div>
-
-            <span className="text-[11px] font-mono text-neutral-300 flex items-center gap-1.5">
-              {activeNowCount > 0 && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              )}
-              {visitors.length} {visitors.length === 1 ? "viewer" : "viewers"}
-            </span>
-          </button>
+        {claims.length > 0 && profile.name && claimSummary && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full bg-blue-950/50 border border-blue-900/60 text-[11px] text-blue-200">
+            <UserRound size={11} />
+            {claimSummary}
+          </span>
         )}
       </div>
 
-      {/* ----------------- AUDIENCE ROSTER MODAL ----------------- */}
-      {isAudienceModalOpen && (
-        <div
-          className="fixed inset-0 z-[85] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200"
-          onClick={() => setIsAudienceModalOpen(false)}
-        >
-          <div
-            className="relative w-full max-w-lg bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-6 shadow-2xl max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-neutral-800/80 pb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-blue-950/60 border border-blue-800/60 text-blue-400 rounded-xl">
-                  <Users size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Album Viewers</h3>
-                  <p className="text-xs text-neutral-400">Audience activity &amp; identity history</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsAudienceModalOpen(false)}
-                className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Quick Metrics Bar */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-neutral-900/60 border border-neutral-800 rounded-xl">
-                <p className="text-[11px] font-mono text-neutral-400 uppercase">Live Right Now</p>
-                <p className="text-xl font-extrabold text-emerald-400 flex items-center gap-2 mt-0.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  {activeNowCount}
-                </p>
-              </div>
-              <div className="p-3 bg-neutral-900/60 border border-neutral-800 rounded-xl">
-                <p className="text-[11px] font-mono text-neutral-400 uppercase">Total Unique Visitors</p>
-                <p className="text-xl font-extrabold text-white mt-0.5">{visitors.length}</p>
-              </div>
-            </div>
-
-            {/* Scrollable Visitor Directory */}
-            <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
-              {visitors.map((v) => {
-                const isActive = Date.now() - v.lastSeen < 5 * 60 * 1000;
-                const isSelf = v.id === profile.id;
-
-                return (
-                  <div
-                    key={v.id}
-                    className="p-3 bg-neutral-900/40 border border-neutral-800/80 rounded-xl space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-neutral-800 border border-white/10 text-base shadow-sm">
-                          {v.emoji}
-                        </span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-white">
-                              {v.name}
-                            </span>
-                            {isSelf && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-blue-950 text-blue-300 border border-blue-800">
-                                You
-                              </span>
-                            )}
-                            {v.isCustomName && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-neutral-800 text-neutral-300">
-                                Custom
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-neutral-500 font-mono">
-                            ID: {v.id.slice(0, 8)}...
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium ${
-                            isActive
-                              ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                              : "text-neutral-400"
-                          }`}
-                        >
-                          <Clock size={10} />
-                          {isActive ? "Active Now" : formatTimeAgo(v.lastSeen)}
-                        </span>
-                        <p className="text-[10px] text-neutral-500 font-mono mt-0.5">
-                          {v.visitCount || 1} {v.visitCount === 1 ? "session" : "sessions"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Alias / Screen Name Edit History */}
-                    {v.aliases && v.aliases.length > 0 && (
-                      <div className="pt-2 border-t border-neutral-800/60 flex items-center gap-1.5 text-[11px] text-neutral-400">
-                        <History size={12} className="text-amber-400 shrink-0" />
-                        <span className="text-[10px] text-neutral-500 font-mono">Formerly:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {v.aliases.map((alias, aIdx) => (
-                            <span
-                              key={aIdx}
-                              className="px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-300 text-[10px] font-mono"
-                            >
-                              &quot;{alias}&quot;
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ----------------- NAME EDIT MODAL ----------------- */}
+      {/* ----------------- PERSONAL IDENTITY MODAL ----------------- */}
       {isEditModalOpen && (
         <div
           className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in duration-200"
           onClick={() => setIsEditModalOpen(false)}
         >
           <div
-            className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-2xl"
+            className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-5 shadow-2xl max-h-[88vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between">
@@ -272,7 +158,7 @@ export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProp
                   {profile.avatarEmoji}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Edit Your Screen Name</h3>
+                  <h3 className="text-sm font-bold text-white">Your Identity</h3>
                   <p className="text-xs text-neutral-400 font-mono">
                     Mascot: {profile.avatarAnimal}
                   </p>
@@ -281,6 +167,7 @@ export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProp
               <button
                 onClick={() => setIsEditModalOpen(false)}
                 className="p-1 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+                aria-label="Close"
               >
                 <X size={16} />
               </button>
@@ -300,18 +187,12 @@ export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProp
                   autoFocus
                 />
                 <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  Updates your identifier for this album and saves to your device.
+                  Saved to your device. Only the Becks see it — other visitors
+                  never see who else is viewing.
                 </p>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white text-xs font-semibold transition cursor-pointer"
-                >
-                  Cancel
-                </button>
+              <div className="flex items-center justify-end gap-2">
                 <button
                   type="submit"
                   disabled={isSaving}
@@ -322,6 +203,57 @@ export default function ViewerPresenceBadge({ albumId }: ViewerPresenceBadgeProp
                 </button>
               </div>
             </form>
+
+            {/* My claimed players */}
+            <div className="space-y-2 pt-1 border-t border-neutral-800/70">
+              <p className="text-xs font-semibold text-neutral-300 pt-2">My Players</p>
+              {claims.length === 0 ? (
+                <p className="text-[11px] text-neutral-500 leading-relaxed">
+                  You haven&apos;t picked a player yet. Pick one to get a
+                  &quot;My Player&quot; view with only their photos.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {claims.map((c) => (
+                    <div
+                      key={c.playerKey}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-white truncate">
+                          {playerKeyLabel(c.playerKey, siteConfig.rosters)}
+                        </p>
+                        <p className="text-[10px] text-neutral-500 font-mono truncate">
+                          {c.category}
+                          {c.relation ? ` · ${c.relation}` : ""}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setProfile(removeVisitorClaim(c.playerKey))}
+                        className="p-2 rounded-lg text-neutral-500 hover:text-red-300 hover:bg-neutral-800 transition cursor-pointer shrink-0"
+                        title="Remove this claim"
+                        aria-label={`Remove claim for ${playerKeyLabel(c.playerKey, siteConfig.rosters)}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {onOpenClaim && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    onOpenClaim();
+                  }}
+                  className="w-full px-4 py-2.5 min-h-[40px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-100 text-xs font-semibold transition cursor-pointer"
+                >
+                  {claims.length === 0 ? "Pick your player" : "Add or change players for this album"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

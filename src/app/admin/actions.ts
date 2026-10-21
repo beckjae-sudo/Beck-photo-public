@@ -764,7 +764,7 @@ export async function getAlbumAudience(albumId: string): Promise<{
     tags: [] as AdminAudienceTag[],
     autoProcessedPhotoIds: [] as string[],
     lastAutoTagRun: null,
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    geminiConfigured: Boolean(getGeminiApiKey()),
   };
   try {
     const isAuth = await checkAdminAuth();
@@ -785,7 +785,7 @@ export async function getAlbumAudience(albumId: string): Promise<{
       tags: tagsData.tags as AdminAudienceTag[],
       autoProcessedPhotoIds: tagsData.autoProcessedPhotoIds,
       lastAutoTagRun: tagsData.lastAutoTagRun,
-      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+      geminiConfigured: Boolean(getGeminiApiKey()),
     };
   } catch (err: any) {
     return { success: false, ...notConfigured, error: err?.message || String(err) };
@@ -840,13 +840,21 @@ export async function adminRemoveAlbumTag(
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
+/** The Gemini API key. Env var names are case-sensitive on Vercel/Linux,
+ *  so accept the lowercase spelling too — the variable was created as
+ *  `gemini_api_key` in the dashboard (Jae, 2026-10-21) and the uppercase
+ *  lookup saw nothing. */
+function getGeminiApiKey(): string {
+  return (process.env.GEMINI_API_KEY || process.env.gemini_api_key || "").trim();
+}
+
 /** Whether auto-tagging is configured (GEMINI_API_KEY present). Lets
  *  admin surfaces that don't load an album's audience (e.g. the category
  *  sweep) show the not-configured state up front instead of mid-run. */
 export async function getAutoTagConfig(): Promise<{ configured: boolean }> {
   const isAuth = await checkAdminAuth();
   if (!isAuth) return { configured: false };
-  return { configured: Boolean(process.env.GEMINI_API_KEY?.trim()) };
+  return { configured: Boolean(getGeminiApiKey()) };
 }
 
 export interface AutoTagPhotoResult {
@@ -997,7 +1005,7 @@ export async function autoTagPhoto(
   displayUrl: string,
   category: string
 ): Promise<AutoTagPhotoResult> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = getGeminiApiKey();
   if (!apiKey) return geminiNotConfigured();
 
   try {

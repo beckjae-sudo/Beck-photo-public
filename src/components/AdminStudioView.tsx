@@ -423,6 +423,7 @@ export default function AdminStudioView() {
         throw new Error(createRes.error || "Failed to save album metadata.");
       }
 
+      const publishedAlbumId = albumId;
       setTitle("");
       setDate("");
       setCategory("");
@@ -430,6 +431,15 @@ export default function AdminStudioView() {
       setCoverPhotoUid("");
       alert("Album successfully created and published!");
       loadData();
+      // Phase 2: offer auto-tagging right away — the run itself lives in
+      // the album editor (Audience & Tags → Auto-tag), one click from here.
+      if (
+        window.confirm(
+          "Auto-tag this album now?\n\nAuto-tag reads the jersey numbers in each photo (Gemini) and tags your roster players for you. You can also do it any time later from the album editor."
+        )
+      ) {
+        window.location.href = `/admin/edit/${publishedAlbumId}`;
+      }
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || JSON.stringify(err);
       alert(`Upload failed: ${msg}`);
@@ -663,6 +673,29 @@ export default function AdminStudioView() {
     if (additions.length === 0) return;
     setRosterFor(cat, [...rosterOf(cat), ...additions]);
     setRosterBulk((prev) => ({ ...prev, [cat]: "" }));
+  };
+
+  // ---------- Team look descriptions (Phase 2 auto-tag) ----------
+  // Stored per category in siteConfig.team_descriptions and saved with the
+  // same Save Settings button. The text tells the auto-tagger which team's
+  // jersey numbers to read (e.g. "white jerseys with red numbers").
+  const teamDescOf = (cat: string): string => {
+    const key = Object.keys(siteConfig.team_descriptions || {}).find(
+      (k) => k.trim().toLowerCase() === cat.trim().toLowerCase()
+    );
+    return key ? siteConfig.team_descriptions[key] : "";
+  };
+
+  const setTeamDescFor = (cat: string, text: string) => {
+    setSiteConfig((prev) => {
+      const existingKey = Object.keys(prev.team_descriptions || {}).find(
+        (k) => k.trim().toLowerCase() === cat.trim().toLowerCase()
+      );
+      const team_descriptions = { ...(prev.team_descriptions || {}) };
+      if (existingKey && existingKey !== cat) delete team_descriptions[existingKey];
+      team_descriptions[cat] = text;
+      return { ...prev, team_descriptions };
+    });
   };
 
   if (isAuthenticated === null) {
@@ -1444,7 +1477,8 @@ export default function AdminStudioView() {
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Team Rosters</h3>
               <p className="text-[11px] text-neutral-500 leading-relaxed">
                 Rosters power the visitor &quot;Pick your player&quot; list and photo
-                tagging (Phase 1). One roster per category: jersey number required,
+                tagging (Phase 1), and the per-team &quot;Team look&quot; text below
+                steers auto-tag jersey-number reading (Phase 2). One roster per category: jersey number required,
                 name optional. Removing a player here never deletes existing tags
                 or visitor claims. Roster changes save with the{" "}
                 <span className="text-neutral-300 font-semibold">Save Settings</span>{" "}
@@ -1461,6 +1495,28 @@ export default function AdminStudioView() {
                         <span className="text-[11px] font-mono text-neutral-500">
                           {players.length} {players.length === 1 ? "player" : "players"}
                         </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor={`team-desc-${cat}`}
+                          className="text-[11px] font-semibold text-neutral-400"
+                        >
+                          Team look — for auto-tag number reading
+                        </label>
+                        <input
+                          id={`team-desc-${cat}`}
+                          type="text"
+                          value={teamDescOf(cat)}
+                          onChange={(e) => setTeamDescFor(cat, e.target.value)}
+                          placeholder="e.g. white jerseys with red numbers, red shorts"
+                          maxLength={200}
+                          className="w-full px-2.5 py-1.5 bg-neutral-900 border border-neutral-800 rounded-md text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-blue-500"
+                        />
+                        <p className="text-[11px] text-neutral-500 leading-relaxed">
+                          Describes OUR kit so the auto-tagger reads our numbers
+                          and ignores the other team&apos;s. Saves with Save Settings.
+                        </p>
                       </div>
 
                       {players.map((p, idx) => (

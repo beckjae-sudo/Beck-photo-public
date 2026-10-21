@@ -9,8 +9,15 @@ import {
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, clampBrightness, sanitizeRosters } from "@/lib/types";
+import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, clampBrightness, sanitizeRosters, sanitizeTeamDescriptions, teamDescriptionFor } from "@/lib/types";
 import { validFontKey } from "@/lib/fonts";
+import { playerKeyFor, rosterForCategory } from "@/lib/players";
+import {
+  readTagsFile,
+  writeTagsFile,
+  tagSource,
+  AutoTagRunSummary,
+} from "@/lib/tagsStore";
 import {
   PUBLIC_CONFIG_KEY,
   PUBLIC_ALBUMS_KEY,
@@ -123,6 +130,7 @@ function sanitizeConfig(raw: unknown): PublicSiteConfig {
     font_description: validFontKey(r.font_description),
     font_ui: validFontKey(r.font_ui),
     rosters: sanitizeRosters(r.rosters),
+    team_descriptions: sanitizeTeamDescriptions(r.team_descriptions),
   };
 }
 
@@ -251,6 +259,17 @@ export async function renameCategory(
     if (rosterFromKey) {
       config.rosters = { ...config.rosters, [to]: config.rosters[rosterFromKey] };
       if (rosterFromKey !== to) delete config.rosters[rosterFromKey];
+    }
+    // Team look descriptions are keyed by category too — carry them along.
+    const descFromKey = Object.keys(config.team_descriptions || {}).find(
+      (k) => k.trim().toLowerCase() === from.toLowerCase()
+    );
+    if (descFromKey) {
+      config.team_descriptions = {
+        ...config.team_descriptions,
+        [to]: config.team_descriptions[descFromKey],
+      };
+      if (descFromKey !== to) delete config.team_descriptions[descFromKey];
     }
 
     await writePublicAlbumsIndex(r2, bucket, updatedAlbums);
@@ -711,6 +730,7 @@ export interface AdminAudienceTag {
   playerKey: string;
   taggedByVisitorId: string;
   createdAt: number;
+  source?: "manual" | "auto";
 }
 
 async function readAlbumJsonFile<T>(r2: S3Client, bucket: string, key: string): Promise<T[]> {
@@ -728,29 +748,47 @@ async function readAlbumJsonFile<T>(r2: S3Client, bucket: string, key: string): 
 }
 
 /** Full per-album audience (visitors incl. claim snapshots + activity
- *  counters) and the album's tag list, for the admin Audience panel. */
+ *  counters), the album's tag list, and auto-tag status, for the admin
+ *  Audience panel. */
 export async function getAlbumAudience(albumId: string): Promise<{
   success: boolean;
   visitors: any[];
   tags: AdminAudienceTag[];
+  autoProcessedPhotoIds: string[];
+  lastAutoTagRun: AutoTagRunSummary | null;
+  geminiConfigured: boolean;
   error?: string;
 }> {
+  const notConfigured = {
+    visitors: [] as any[],
+    tags: [] as AdminAudienceTag[],
+    autoProcessedPhotoIds: [] as string[],
+    lastAutoTagRun: null,
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+  };
   try {
     const isAuth = await checkAdminAuth();
-    if (!isAuth) return { success: false, visitors: [], tags: [], error: "Unauthorized" };
+    if (!isAuth) return { success: false, ...notConfigured, error: "Unauthorized" };
 
     const bucket = process.env.R2_BUCKET_NAME?.trim();
-    if (!bucket) return { success: false, visitors: [], tags: [], error: "R2_BUCKET_NAME is not set." };
+    if (!bucket) return { success: false, ...notConfigured, error: "R2_BUCKET_NAME is not set." };
 
     const id = String(albumId || "").trim();
-    if (!id) return { success: false, visitors: [], tags: [], error: "Missing album id." };
+    if (!id) return { success: false, ...notConfigured, error: "Missing album id." };
 
     const r2 = getR2WriteClient();
     const visitors = await readAlbumJsonFile<any>(r2, bucket, `${id}/visitors.json`);
-    const tags = await readAlbumJsonFile<AdminAudienceTag>(r2, bucket, `${id}/tags.json`);
-    return { success: true, visitors, tags };
+    const tagsData = await readTagsFile(id);
+    return {
+      success: true,
+      visitors,
+      tags: tagsData.tags as AdminAudienceTag[],
+      autoProcessedPhotoIds: tagsData.autoProcessedPhotoIds,
+      lastAutoTagRun: tagsData.lastAutoTagRun,
+      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    };
   } catch (err: any) {
-    return { success: false, visitors: [], tags: [], error: err?.message || String(err) };
+    return { success: false, ...notConfigured, error: err?.message || String(err) };
   }
 }
 
@@ -773,22 +811,383 @@ export async function adminRemoveAlbumTag(
     const key = String(playerKey || "").trim();
     if (!id || !pid || !key) return { success: false, tags: [], error: "Missing tag details." };
 
-    const r2 = getR2WriteClient();
-    const tags = await readAlbumJsonFile<AdminAudienceTag>(r2, bucket, `${id}/tags.json`);
-    const next = tags.filter((t) => !(t.photoId === pid && t.playerKey === key));
-    if (next.length !== tags.length) {
-      await r2.send(
-        new PutObjectCommand({
-          Bucket: bucket,
-          Key: `${id}/tags.json`,
-          Body: JSON.stringify(next, null, 2),
-          ContentType: "application/json",
-          CacheControl: "no-cache",
-        })
-      );
+    const data = await readTagsFile(id);
+    const next = data.tags.filter((t) => !(t.photoId === pid && t.playerKey === key));
+    if (next.length !== data.tags.length) {
+      data.tags = next;
+      const ok = await writeTagsFile(id, data);
+      if (!ok) return { success: false, tags: data.tags as AdminAudienceTag[], error: "Could not save." };
     }
-    return { success: true, tags: next };
+    return { success: true, tags: next as AdminAudienceTag[] };
   } catch (err: any) {
     return { success: false, tags: [], error: err?.message || String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 auto-tagging (admin only): jersey-number reading via Gemini.
+//
+// The browser drives the run photo by photo (same loop shape as uploads);
+// each call below handles ONE photo: fetch its display-size version, ask
+// Gemini for clearly readable jersey numbers on the SUBJECT team only,
+// and turn numbers that match the album category's roster into tags with
+// source "auto". Numbers are the only signal — no faces, no biometrics.
+//
+// The Gemini key comes from the GEMINI_API_KEY env var (Vercel). When it
+// is absent every action reports { configured: false } and the admin UI
+// explains how to enable the feature.
+// ---------------------------------------------------------------------------
+
+const GEMINI_MODEL = "gemini-2.5-flash";
+
+export interface AutoTagPhotoResult {
+  success: boolean;
+  configured: boolean;
+  /** True when the photo was already auto-processed in an earlier run. */
+  skipped?: boolean;
+  /** Roster numbers the model read on this photo. */
+  numbers: string[];
+  /** New auto tags created by this call. */
+  tagsCreated: number;
+  /** Numbers read that are not on the (active) roster. */
+  unknownNumbers: string[];
+  error?: string;
+}
+
+function geminiNotConfigured(): AutoTagPhotoResult {
+  return {
+    success: false,
+    configured: false,
+    numbers: [],
+    tagsCreated: 0,
+    unknownNumbers: [],
+    error:
+      "Auto-tag isn't configured — add the GEMINI_API_KEY environment variable in Vercel to enable jersey-number reading.",
+  };
+}
+
+/** Ask Gemini which jersey numbers are clearly readable in one photo.
+ *  One retry on transient failures (rate limit / 5xx / network), per the
+ *  phase-2 cost guardrails. Throws on a final failure. */
+async function readJerseyNumbers(
+  apiKey: string,
+  imageBase64: string,
+  mimeType: string,
+  teamDescription: string,
+  rosterNumbers: string[]
+): Promise<string[]> {
+  const desc =
+    teamDescription.trim() ||
+    "the subject team — the team this photo album is about";
+  const rosterHint = rosterNumbers.length
+    ? ` Their roster numbers are: ${rosterNumbers.join(", ")}.`
+    : "";
+  const prompt =
+    `Look at this sports photo. The subject team is: ${desc}.${rosterHint}\n\n` +
+    `List the jersey numbers that are CLEARLY readable on players wearing the subject team's uniform. ` +
+    `Rules: only numbers printed on the subject team's jerseys; ignore the opposing team, referees, coaches, spectators, banners, signs, advertisements and scoreboards; ` +
+    `include a number only if you can actually read its digits in the image — never guess; if a number is partially hidden or blurry, leave it out.\n\n` +
+    `Respond with ONLY a JSON array of number strings, e.g. ["12","7"]. If no subject-team jersey number is clearly readable, respond with [].`;
+
+  const body = {
+    contents: [
+      {
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: imageBase64 } },
+        ],
+      },
+    ],
+    generationConfig: { temperature: 0, responseMimeType: "application/json" },
+  };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        const transient = res.status === 429 || res.status >= 500;
+        const err = new Error(
+          `Gemini request failed (HTTP ${res.status})${text ? `: ${text.slice(0, 200)}` : ""}`
+        );
+        if (transient && attempt === 0) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+      const json: any = await res.json();
+      const parts = json?.candidates?.[0]?.content?.parts;
+      const text = Array.isArray(parts)
+        ? parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("")
+        : "";
+      return parseJerseyNumbers(text);
+    } catch (err) {
+      lastError = err;
+      if (attempt === 0) continue; // single retry on network errors too
+      throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Gemini request failed.");
+}
+
+/** Defensive parse: accept a JSON array, or dig the first [...] out of
+ *  prose/code fences. Items are coerced to trimmed strings, deduped. */
+function parseJerseyNumbers(text: string): string[] {
+  const coerce = (arr: unknown[]): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of arr) {
+      const n = String(item ?? "").trim();
+      if (n && !seen.has(n)) {
+        seen.add(n);
+        out.push(n);
+      }
+    }
+    return out;
+  };
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return coerce(parsed);
+  } catch {
+    // fall through to extraction
+  }
+  const match = trimmed.match(/\[[\s\S]*?\]/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) return coerce(parsed);
+    } catch {
+      // give up below
+    }
+  }
+  return [];
+}
+
+/**
+ * Auto-tag ONE photo. The photo is marked auto-processed in tags.json
+ * even when no number is readable, so re-runs skip it (resumability).
+ * A photo that already has a tag for a player (any source) is never
+ * double-tagged; numbers not on the category's active roster are
+ * reported back as unknown instead of being tagged.
+ */
+export async function autoTagPhoto(
+  albumId: string,
+  photoId: string,
+  displayUrl: string,
+  category: string
+): Promise<AutoTagPhotoResult> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) return geminiNotConfigured();
+
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) {
+      return {
+        success: false,
+        configured: true,
+        numbers: [],
+        tagsCreated: 0,
+        unknownNumbers: [],
+        error: "Admin session expired. Please log in again.",
+      };
+    }
+
+    const id = String(albumId || "").trim();
+    const pid = String(photoId || "").trim();
+    const url = String(displayUrl || "").trim();
+    const cat = String(category || "").trim();
+    if (!id || !pid || !url || !cat) {
+      return {
+        success: false,
+        configured: true,
+        numbers: [],
+        tagsCreated: 0,
+        unknownNumbers: [],
+        error: "Missing photo details for auto-tag.",
+      };
+    }
+
+    // Only ever fetch images from this site's own public bucket.
+    const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.trim().replace(/\/$/, "");
+    if (!baseUrl || !url.startsWith(`${baseUrl}/`)) {
+      return {
+        success: false,
+        configured: true,
+        numbers: [],
+        tagsCreated: 0,
+        unknownNumbers: [],
+        error: "That photo URL isn't on this site's image host — refusing to fetch it.",
+      };
+    }
+
+    const data = await readTagsFile(id);
+    if (data.autoProcessedPhotoIds.includes(pid)) {
+      return {
+        success: true,
+        configured: true,
+        skipped: true,
+        numbers: [],
+        tagsCreated: 0,
+        unknownNumbers: [],
+      };
+    }
+
+    const config = await getPublicSiteConfig();
+    const roster = rosterForCategory(config.rosters, cat).filter((p) => p.active);
+    const rosterNumbers = roster.map((p) => p.number);
+    const teamDescription = teamDescriptionFor(config.team_descriptions, cat);
+
+    // Fetch the display-size (1920px) version only — never the original.
+    const imgRes = await fetch(url, { cache: "no-store" });
+    if (!imgRes.ok) {
+      return {
+        success: false,
+        configured: true,
+        numbers: [],
+        tagsCreated: 0,
+        unknownNumbers: [],
+        error: `Could not load the photo (HTTP ${imgRes.status}).`,
+      };
+    }
+    const mimeType = imgRes.headers.get("content-type")?.split(";")[0]?.trim() || "image/webp";
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    if (buffer.length > 12 * 1024 * 1024) {
+      return {
+        success: false,
+        configured: true,
+        numbers: [],
+        tagsCreated: 0,
+        unknownNumbers: [],
+        error: "That photo's display version is unexpectedly large — skipped.",
+      };
+    }
+
+    const numbers = await readJerseyNumbers(
+      apiKey,
+      buffer.toString("base64"),
+      mimeType,
+      teamDescription,
+      rosterNumbers
+    );
+
+    const rosterSet = new Set(rosterNumbers);
+    const unknownNumbers: string[] = [];
+    let tagsCreated = 0;
+    const now = Date.now();
+    for (const n of numbers) {
+      if (!rosterSet.has(n)) {
+        unknownNumbers.push(n);
+        continue;
+      }
+      const key = playerKeyFor(cat, n);
+      if (data.tags.some((t) => t.photoId === pid && t.playerKey === key)) continue;
+      data.tags.push({
+        photoId: pid,
+        playerKey: key,
+        taggedByVisitorId: "auto",
+        createdAt: now,
+        source: "auto",
+      });
+      tagsCreated += 1;
+    }
+
+    data.autoProcessedPhotoIds = [...data.autoProcessedPhotoIds, pid];
+    const ok = await writeTagsFile(id, data);
+    if (!ok) {
+      return {
+        success: false,
+        configured: true,
+        numbers,
+        tagsCreated: 0,
+        unknownNumbers,
+        error: "Could not save the auto-tag results.",
+      };
+    }
+
+    return { success: true, configured: true, numbers, tagsCreated, unknownNumbers };
+  } catch (err: any) {
+    return {
+      success: false,
+      configured: true,
+      numbers: [],
+      tagsCreated: 0,
+      unknownNumbers: [],
+      error: err?.message || String(err),
+    };
+  }
+}
+
+/** Persist the summary of a finished (or cancelled) auto-tag run so the
+ *  admin sees it on revisit. Counts are clamped to sane ranges. */
+export async function finishAutoTagRun(
+  albumId: string,
+  summary: AutoTagRunSummary
+): Promise<{ success: boolean }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false };
+
+    const id = String(albumId || "").trim();
+    if (!id) return { success: false };
+
+    const clamp = (v: unknown) => {
+      const n = Math.floor(Number(v));
+      return Number.isFinite(n) && n > 0 ? Math.min(n, 1_000_000) : 0;
+    };
+    const data = await readTagsFile(id);
+    data.lastAutoTagRun = {
+      at: clamp(summary?.at) || Date.now(),
+      processed: clamp(summary?.processed),
+      skipped: clamp(summary?.skipped),
+      failed: clamp(summary?.failed),
+      tagsCreated: clamp(summary?.tagsCreated),
+      unknownNumbers: clamp(summary?.unknownNumbers),
+    };
+    const ok = await writeTagsFile(id, data);
+    return { success: ok };
+  } catch {
+    return { success: false };
+  }
+}
+
+/** Bulk-clear every machine-made tag on an album and reset the
+ *  auto-processed markers, so auto-tag can be re-run from scratch.
+ *  Human (manual) tags are never touched. */
+export async function clearAutoTags(
+  albumId: string
+): Promise<{ success: boolean; removed: number; tags: AdminAudienceTag[]; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, removed: 0, tags: [], error: "Unauthorized" };
+
+    const id = String(albumId || "").trim();
+    if (!id) return { success: false, removed: 0, tags: [], error: "Missing album id." };
+
+    const data = await readTagsFile(id);
+    const kept = data.tags.filter((t) => tagSource(t) !== "auto");
+    const removed = data.tags.length - kept.length;
+    const hadProcessed = data.autoProcessedPhotoIds.length > 0;
+    if (removed === 0 && !hadProcessed) {
+      return { success: true, removed: 0, tags: data.tags as AdminAudienceTag[] };
+    }
+    data.tags = kept;
+    data.autoProcessedPhotoIds = [];
+    const ok = await writeTagsFile(id, data);
+    if (!ok) return { success: false, removed: 0, tags: data.tags as AdminAudienceTag[], error: "Could not save." };
+    return { success: true, removed, tags: kept as AdminAudienceTag[] };
+  } catch (err: any) {
+    return { success: false, removed: 0, tags: [], error: err?.message || String(err) };
   }
 }

@@ -9,7 +9,7 @@ import {
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, clampBrightness } from "@/lib/types";
+import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, clampBrightness, sanitizeRosters } from "@/lib/types";
 import { validFontKey } from "@/lib/fonts";
 import {
   PUBLIC_CONFIG_KEY,
@@ -122,6 +122,7 @@ function sanitizeConfig(raw: unknown): PublicSiteConfig {
     font_headline: validFontKey(r.font_headline),
     font_description: validFontKey(r.font_description),
     font_ui: validFontKey(r.font_ui),
+    rosters: sanitizeRosters(r.rosters),
   };
 }
 
@@ -242,6 +243,15 @@ export async function renameCategory(
 
     config.categories = replaceCategoryInList(config.categories, from, to);
     config.visible_categories = replaceCategoryInList(config.visible_categories, from, to);
+    // Rosters are keyed by category name — move the roster along so a
+    // rename doesn't orphan the team's player list (Phase 1).
+    const rosterFromKey = Object.keys(config.rosters || {}).find(
+      (k) => k.trim().toLowerCase() === from.toLowerCase()
+    );
+    if (rosterFromKey) {
+      config.rosters = { ...config.rosters, [to]: config.rosters[rosterFromKey] };
+      if (rosterFromKey !== to) delete config.rosters[rosterFromKey];
+    }
 
     await writePublicAlbumsIndex(r2, bucket, updatedAlbums);
     await savePublicSiteConfigToR2(config);
@@ -685,5 +695,100 @@ export async function importAlbumsFromFamily(
     return { success: true, imported: toImport.length, hiddenCategories };
   } catch (err: any) {
     return { success: false, error: err?.message || String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 audience & tag moderation (admin-only reads/writes)
+//
+// The full visitors list and per-tag detail are NEVER exposed to public
+// clients (spec §5/§10): the public presence actions return only the
+// caller's own record, and the full list is read here, behind checkAdminAuth.
+// ---------------------------------------------------------------------------
+
+export interface AdminAudienceTag {
+  photoId: string;
+  playerKey: string;
+  taggedByVisitorId: string;
+  createdAt: number;
+}
+
+async function readAlbumJsonFile<T>(r2: S3Client, bucket: string, key: string): Promise<T[]> {
+  try {
+    const obj = await r2.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const str = await obj.Body?.transformToString();
+    if (str) {
+      const data = JSON.parse(str);
+      if (Array.isArray(data)) return data as T[];
+    }
+  } catch {
+    // missing file -> empty
+  }
+  return [];
+}
+
+/** Full per-album audience (visitors incl. claim snapshots + activity
+ *  counters) and the album's tag list, for the admin Audience panel. */
+export async function getAlbumAudience(albumId: string): Promise<{
+  success: boolean;
+  visitors: any[];
+  tags: AdminAudienceTag[];
+  error?: string;
+}> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, visitors: [], tags: [], error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, visitors: [], tags: [], error: "R2_BUCKET_NAME is not set." };
+
+    const id = String(albumId || "").trim();
+    if (!id) return { success: false, visitors: [], tags: [], error: "Missing album id." };
+
+    const r2 = getR2WriteClient();
+    const visitors = await readAlbumJsonFile<any>(r2, bucket, `${id}/visitors.json`);
+    const tags = await readAlbumJsonFile<AdminAudienceTag>(r2, bucket, `${id}/tags.json`);
+    return { success: true, visitors, tags };
+  } catch (err: any) {
+    return { success: false, visitors: [], tags: [], error: err?.message || String(err) };
+  }
+}
+
+/** Admin moderation: remove any tag on an album (visitors can only remove
+ *  their own, via removeAlbumTag). */
+export async function adminRemoveAlbumTag(
+  albumId: string,
+  photoId: string,
+  playerKey: string
+): Promise<{ success: boolean; tags: AdminAudienceTag[]; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, tags: [], error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, tags: [], error: "R2_BUCKET_NAME is not set." };
+
+    const id = String(albumId || "").trim();
+    const pid = String(photoId || "").trim();
+    const key = String(playerKey || "").trim();
+    if (!id || !pid || !key) return { success: false, tags: [], error: "Missing tag details." };
+
+    const r2 = getR2WriteClient();
+    const tags = await readAlbumJsonFile<AdminAudienceTag>(r2, bucket, `${id}/tags.json`);
+    const next = tags.filter((t) => !(t.photoId === pid && t.playerKey === key));
+    if (next.length !== tags.length) {
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: `${id}/tags.json`,
+          Body: JSON.stringify(next, null, 2),
+          ContentType: "application/json",
+          CacheControl: "no-cache",
+        })
+      );
+    }
+    return { success: true, tags: next };
+  } catch (err: any) {
+    return { success: false, tags: [], error: err?.message || String(err) };
   }
 }

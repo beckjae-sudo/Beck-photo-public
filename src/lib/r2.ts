@@ -5,6 +5,7 @@ import {
   PublicSiteConfig,
   clampBrightness,
   isAlbumVisible,
+  sanitizeRosters,
 } from "./types";
 import { validFontKey } from "./fonts";
 
@@ -56,6 +57,7 @@ export async function getPublicSiteConfig(): Promise<PublicSiteConfig> {
       font_headline: validFontKey(raw?.font_headline),
       font_description: validFontKey(raw?.font_description),
       font_ui: validFontKey(raw?.font_ui),
+      rosters: sanitizeRosters(raw?.rosters),
     };
   } catch {
     return DEFAULT_PUBLIC_CONFIG;

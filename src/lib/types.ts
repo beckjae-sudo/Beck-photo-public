@@ -10,6 +10,37 @@ export interface AlbumSummary {
   photos_pool?: string[];
 }
 
+/** One player on a team's roster (Phase 1 viewer-identity feature).
+ *  Jersey number is the identity anchor; the name is display-only. */
+export interface RosterPlayer {
+  number: string;
+  name?: string;
+  active: boolean;
+}
+
+/** Rosters keyed by category (team) name, exactly as stored in the config. */
+export type RosterMap = Record<string, RosterPlayer[]>;
+
+/** Validate/normalize an unknown value into a RosterMap. Drops malformed
+ *  entries; a player with no jersey number is dropped (number is required). */
+export function sanitizeRosters(input: unknown): RosterMap {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const out: RosterMap = {};
+  for (const [cat, list] of Object.entries(input as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue;
+    const players: RosterPlayer[] = [];
+    for (const item of list) {
+      const p = (item || {}) as Partial<RosterPlayer>;
+      const number = String(p.number ?? "").trim().slice(0, 12);
+      if (!number) continue;
+      const name = String(p.name ?? "").trim().slice(0, 60);
+      players.push({ number, ...(name ? { name } : {}), active: p.active !== false });
+    }
+    out[cat] = players;
+  }
+  return out;
+}
+
 /**
  * Config for the PUBLIC companion site, stored as site_config_public.json
  * in the shared R2 bucket. The family site keeps using site_config.json.
@@ -39,6 +70,9 @@ export interface PublicSiteConfig {
   font_headline: string;
   font_description: string;
   font_ui: string;
+  /** Team rosters (Phase 1): category name -> players. Drives the claim
+   *  picker and player tagging. Managed in /admin → Site Design. */
+  rosters: RosterMap;
 }
 
 /** Clamp a brightness value to the 0-100 range, falling back when invalid. */
@@ -80,6 +114,7 @@ export const DEFAULT_PUBLIC_CONFIG: PublicSiteConfig = {
   font_headline: "geist",
   font_description: "geist",
   font_ui: "geist",
+  rosters: {},
 };
 
 export function isAlbumVisible(

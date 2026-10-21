@@ -1,3 +1,5 @@
+import { VisitorClaim } from "./players";
+
 export interface VisitorProfile {
   id: string;
   name: string | null;
@@ -5,6 +7,9 @@ export interface VisitorProfile {
   avatarEmoji: string;
   avatarColor: string;
   isCustomName: boolean;
+  /** Phase 1 claimed players (opt-in). Absent/empty = unclaimed mascot,
+   *  exactly the pre-Phase-1 experience. */
+  claims?: VisitorClaim[];
 }
 
 const ANIMALS = [
@@ -33,7 +38,8 @@ export function getOrCreateVisitorProfile(): VisitorProfile {
   const stored = localStorage.getItem("beck_visitor_profile");
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      return { claims: [], ...parsed };
     } catch {}
   }
 
@@ -48,10 +54,39 @@ export function getOrCreateVisitorProfile(): VisitorProfile {
     avatarEmoji: randomAnimal.emoji,
     avatarColor: randomAnimal.color,
     isCustomName: false,
+    claims: [],
   };
 
   localStorage.setItem("beck_visitor_profile", JSON.stringify(newProfile));
   return newProfile;
+}
+
+/** Persist a profile and notify any mounted components (badge, album view)
+ *  so every surface reflects a claim/name change immediately. */
+export function saveVisitorProfile(profile: VisitorProfile): VisitorProfile {
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("beck_visitor_profile", JSON.stringify(profile));
+    } catch {}
+    window.dispatchEvent(
+      new CustomEvent<VisitorProfile>("bpp:profile", { detail: profile })
+    );
+  }
+  return profile;
+}
+
+/** Subscribe to profile changes made anywhere on the page. Returns an
+ *  unsubscribe function. */
+export function onVisitorProfileChange(
+  cb: (profile: VisitorProfile) => void
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  const handler = (e: Event) => {
+    const detail = (e as CustomEvent<VisitorProfile>).detail;
+    if (detail) cb(detail);
+  };
+  window.addEventListener("bpp:profile", handler);
+  return () => window.removeEventListener("bpp:profile", handler);
 }
 
 export function updateVisitorName(customName: string): VisitorProfile {
@@ -64,8 +99,26 @@ export function updateVisitorName(customName: string): VisitorProfile {
     isCustomName: Boolean(trimmed),
   };
 
-  if (typeof window !== "undefined") {
-    localStorage.setItem("beck_visitor_profile", JSON.stringify(updated));
-  }
-  return updated;
+  return saveVisitorProfile(updated);
+}
+
+/** Replace the visitor's claims for ONE category, keeping claims made in
+ *  other categories untouched (multi-team families, siblings). */
+export function setVisitorClaimsForCategory(
+  category: string,
+  claims: VisitorClaim[]
+): VisitorProfile {
+  const current = getOrCreateVisitorProfile();
+  const catKey = String(category || "").trim().toLowerCase();
+  const kept = (current.claims || []).filter(
+    (c) => String(c.category || "").trim().toLowerCase() !== catKey
+  );
+  return saveVisitorProfile({ ...current, claims: [...kept, ...claims] });
+}
+
+/** Remove a single claim by player key (any category). */
+export function removeVisitorClaim(playerKey: string): VisitorProfile {
+  const current = getOrCreateVisitorProfile();
+  const claims = (current.claims || []).filter((c) => c.playerKey !== playerKey);
+  return saveVisitorProfile({ ...current, claims });
 }

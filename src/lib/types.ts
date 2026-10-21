@@ -41,6 +41,35 @@ export function sanitizeRosters(input: unknown): RosterMap {
   return out;
 }
 
+/** Team look descriptions keyed by category, e.g. "white jerseys with red
+ *  numbers, red shorts". Written by the admin in the Rosters section and
+ *  used ONLY to tell the auto-tagger which team's jersey numbers to read. */
+export type TeamDescriptionMap = Record<string, string>;
+
+/** Validate/normalize an unknown value into a TeamDescriptionMap. */
+export function sanitizeTeamDescriptions(input: unknown): TeamDescriptionMap {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const out: TeamDescriptionMap = {};
+  for (const [cat, value] of Object.entries(input as Record<string, unknown>)) {
+    const text = String(value ?? "").trim().slice(0, 200);
+    if (text) out[cat] = text;
+  }
+  return out;
+}
+
+/** The team look description stored for a category (case-insensitive match). */
+export function teamDescriptionFor(
+  descriptions: TeamDescriptionMap | undefined,
+  category: string
+): string {
+  if (!descriptions || !category) return "";
+  const target = category.trim().toLowerCase();
+  for (const [cat, text] of Object.entries(descriptions)) {
+    if (cat.trim().toLowerCase() === target) return String(text || "");
+  }
+  return "";
+}
+
 /**
  * Config for the PUBLIC companion site, stored as site_config_public.json
  * in the shared R2 bucket. The family site keeps using site_config.json.
@@ -73,6 +102,10 @@ export interface PublicSiteConfig {
   /** Team rosters (Phase 1): category name -> players. Drives the claim
    *  picker and player tagging. Managed in /admin → Site Design. */
   rosters: RosterMap;
+  /** Team look descriptions (Phase 2 auto-tag): category name -> text
+   *  describing the subject team's kit, so the number reader can tell
+   *  our players from the opposing team. Managed next to the rosters. */
+  team_descriptions: TeamDescriptionMap;
 }
 
 /** Clamp a brightness value to the 0-100 range, falling back when invalid. */
@@ -115,6 +148,7 @@ export const DEFAULT_PUBLIC_CONFIG: PublicSiteConfig = {
   font_description: "geist",
   font_ui: "geist",
   rosters: {},
+  team_descriptions: {},
 };
 
 export function isAlbumVisible(

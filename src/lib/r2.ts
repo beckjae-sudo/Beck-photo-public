@@ -6,6 +6,7 @@ import {
   clampBrightness,
   isAlbumVisible,
   sanitizeRosters,
+  sanitizeTeamDescriptions,
 } from "./types";
 import { validFontKey } from "./fonts";
 
@@ -58,6 +59,7 @@ export async function getPublicSiteConfig(): Promise<PublicSiteConfig> {
       font_description: validFontKey(raw?.font_description),
       font_ui: validFontKey(raw?.font_ui),
       rosters: sanitizeRosters(raw?.rosters),
+      team_descriptions: sanitizeTeamDescriptions(raw?.team_descriptions),
     };
   } catch {
     return DEFAULT_PUBLIC_CONFIG;

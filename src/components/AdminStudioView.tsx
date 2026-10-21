@@ -16,7 +16,12 @@ import {
   autoTagPhoto,
   finishAutoTagRun,
 } from "@/app/admin/actions";
-import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, RosterPlayer } from "@/lib/types";
+import {
+  DEFAULT_PUBLIC_CONFIG,
+  PublicSiteConfig,
+  RosterPlayer,
+  teamDescriptionFor,
+} from "@/lib/types";
 import { FONT_OPTIONS, fontVariableFor } from "@/lib/fonts";
 import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
 import {
@@ -64,6 +69,7 @@ export default function AdminStudioView() {
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [category, setCategory] = useState("");
+  const [teamLook, setTeamLook] = useState("");
   const [photos, setPhotos] = useState<ProcessedPhoto[]>([]);
   const [coverPhotoUid, setCoverPhotoUid] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
@@ -106,6 +112,8 @@ export default function AdminStudioView() {
     }
     return [...seen.values()].sort((a, b) => a.localeCompare(b));
   }, [siteConfig.categories, allCategories]);
+
+  const categoryTeamLook = teamDescriptionFor(siteConfig.team_descriptions, category);
 
   // Album Deletion Confirmation State
   const [albumToDelete, setAlbumToDelete] = useState<any | null>(null);
@@ -420,6 +428,7 @@ export default function AdminStudioView() {
         title,
         date: date || new Date().toISOString().split("T")[0],
         category,
+        teamLook: teamLook.trim(),
         photos: uploadedPhotosData,
         cover_url: finalCoverUrl,
       });
@@ -432,6 +441,7 @@ export default function AdminStudioView() {
       setTitle("");
       setDate("");
       setCategory("");
+      setTeamLook("");
       setPhotos([]);
       setCoverPhotoUid("");
       alert("Album successfully created and published!");
@@ -1061,6 +1071,36 @@ export default function AdminStudioView() {
                     className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="new-album-team-look"
+                  className="text-xs font-semibold text-neutral-300"
+                >
+                  What did your team wear in this game? (optional)
+                </label>
+                <textarea
+                  id="new-album-team-look"
+                  value={teamLook}
+                  onChange={(e) => setTeamLook(e.target.value)}
+                  placeholder={
+                    categoryTeamLook ||
+                    "e.g. Navy jerseys with white numbers, navy shorts"
+                  }
+                  rows={3}
+                  maxLength={200}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white placeholder:text-neutral-500 text-sm focus:outline-none focus:border-neutral-600 resize-y"
+                />
+                <p className="text-[11px] text-neutral-500 leading-relaxed">
+                  Team look for this album — used only when auto-tagging reads
+                  jersey numbers. Leave it blank to use the category description.
+                </p>
+                {!teamLook.trim() && categoryTeamLook && (
+                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                    Category fallback: {categoryTeamLook}
+                  </p>
+                )}
               </div>
 
               <div

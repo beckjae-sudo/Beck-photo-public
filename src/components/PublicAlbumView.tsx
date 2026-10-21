@@ -33,6 +33,7 @@ import ShareSheet from "@/components/ShareSheet";
 import ViewerPresenceBadge from "@/components/ViewerPresenceBadge";
 import ClaimModal from "@/components/ClaimModal";
 import TagPicker from "@/components/TagPicker";
+import TagPlayerPicker from "@/components/TagPlayerPicker";
 import {
   getOrCreateVisitorProfile,
   onVisitorProfileChange,
@@ -40,6 +41,7 @@ import {
 } from "@/lib/visitorIdentity";
 import {
   buildPlayerOptions,
+  parsePlayerKey,
   playerKeyLabel,
   rosterForCategory,
 } from "@/lib/players";
@@ -47,6 +49,7 @@ import {
   addAlbumTag,
   getAlbumTags,
   removeAlbumTag,
+  removeAutoTag,
   TagRecord,
 } from "@/app/actions/tags";
 import { recordAlbumActivity } from "@/app/actions/presence";
@@ -177,6 +180,10 @@ export default function PublicAlbumView() {
   const [subFilterKey, setSubFilterKey] = useState<string | null>(null);
   const [claimModalOpen, setClaimModalOpen] = useState(false);
   const [tagMode, setTagMode] = useState(false);
+  // Phase 2 sticky tagging: the ONE player tag mode applies on every tap.
+  // Null = not chosen yet (entering tag mode prompts a single pick).
+  const [stickyTagKey, setStickyTagKey] = useState<string | null>(null);
+  const [playerPickOpen, setPlayerPickOpen] = useState(false);
   const [tagPickerPhoto, setTagPickerPhoto] = useState<Photo | null>(null);
   const [claimCardDismissed, setClaimCardDismissed] = useState<boolean>(() => {
     try {
@@ -284,6 +291,38 @@ export default function PublicAlbumView() {
     () => buildPlayerOptions(category, siteConfig.rosters, visitorProfile?.claims || []),
     [category, siteConfig.rosters, visitorProfile]
   );
+
+  // Phase 2 sticky tagging derived state: full label for the bar
+  // ("#12 — Walker") and the short form for compact buttons ("Tag #12").
+  const stickyLabel = stickyTagKey
+    ? playerKeyLabel(stickyTagKey, siteConfig.rosters)
+    : "";
+  const stickyShortLabel = useMemo(() => {
+    if (!stickyTagKey) return "";
+    const parsed = parsePlayerKey(stickyTagKey);
+    return parsed.number !== null ? `#${parsed.number}` : stickyLabel;
+  }, [stickyTagKey, stickyLabel]);
+
+  // If the last claim goes away, tag mode (and its sticky player) goes too.
+  useEffect(() => {
+    if (!hasAnyClaim && tagMode) {
+      setTagMode(false);
+      setStickyTagKey(null);
+      setPlayerPickOpen(false);
+    }
+  }, [hasAnyClaim, tagMode]);
+
+  // If the sticky player stops being a valid option (claim removed, roster
+  // change), clear it — tag mode then asks for one fresh pick.
+  useEffect(() => {
+    if (
+      stickyTagKey &&
+      tagOptions.length > 0 &&
+      !tagOptions.some((o) => o.key === stickyTagKey)
+    ) {
+      setStickyTagKey(null);
+    }
+  }, [stickyTagKey, tagOptions]);
 
   // If the last claim for this album goes away, the My Player view goes too.
   useEffect(() => {
@@ -687,28 +726,73 @@ export default function PublicAlbumView() {
     }
   };
 
-  // Phase 1 tag toggle: add/remove via the tags actions; the server returns
-  // the album's full updated tag list, which becomes the new local state.
-  const handleTagToggle = async (playerKey: string, currentlyTagged: boolean) => {
-    if (!tagPickerPhoto || !visitorProfile) return;
-    if (currentlyTagged) {
-      const res = await removeAlbumTag(albumId, {
-        photoId: tagPickerPhoto.id,
-        playerKey,
-        visitorId: visitorProfile.id,
-      });
-      if (res.success) setAlbumTags(res.tags);
-    } else {
-      const res = await addAlbumTag(albumId, {
-        photoId: tagPickerPhoto.id,
-        playerKey,
-        visitorId: visitorProfile.id,
-      });
-      if (res.success) {
-        setAlbumTags(res.tags);
-        recordAlbumActivity(albumId, visitorProfile.id, { tagsMade: 1 }).catch(() => {});
+  // Phase 1/2 tag toggle for ANY photo: add when absent; remove when the
+  // existing tag is the visitor's own manual tag or an AUTO tag (auto tags
+  // are provisional — any claimed visitor can correct one). Someone else's
+  // manual tag is left alone. The server returns the album's full updated
+  // tag list, which becomes the new local state.
+  const toggleTagForPhoto = async (photo: Photo, playerKey: string) => {
+    if (!visitorProfile) return;
+    const existing = (tagsByPhoto.get(photo.id) || []).find(
+      (t) => t.playerKey === playerKey
+    );
+    if (existing) {
+      if (existing.source === "auto") {
+        const res = await removeAutoTag(albumId, {
+          photoId: photo.id,
+          playerKey,
+          visitorId: visitorProfile.id,
+        });
+        if (res.success) setAlbumTags(res.tags);
+      } else if (existing.taggedByVisitorId === visitorProfile.id) {
+        const res = await removeAlbumTag(albumId, {
+          photoId: photo.id,
+          playerKey,
+          visitorId: visitorProfile.id,
+        });
+        if (res.success) setAlbumTags(res.tags);
       }
+      return;
     }
+    const res = await addAlbumTag(albumId, {
+      photoId: photo.id,
+      playerKey,
+      visitorId: visitorProfile.id,
+    });
+    if (res.success) {
+      setAlbumTags(res.tags);
+      recordAlbumActivity(albumId, visitorProfile.id, { tagsMade: 1 }).catch(() => {});
+    }
+  };
+
+  // TagPicker path (outside tag mode): same toggle, bound to the photo the
+  // picker was opened for.
+  const handleTagToggle = async (playerKey: string) => {
+    if (!tagPickerPhoto) return;
+    await toggleTagForPhoto(tagPickerPhoto, playerKey);
+  };
+
+  // ---- Phase 2 sticky tag mode: pick once, tap many ----
+  const enterTagMode = () => {
+    if (!hasAnyClaim) return;
+    setTagMode(true);
+    if (!stickyTagKey) setPlayerPickOpen(true);
+  };
+  const exitTagMode = () => {
+    setTagMode(false);
+    setPlayerPickOpen(false);
+  };
+  const handlePlayerPick = (playerKey: string) => {
+    setStickyTagKey(playerKey);
+    setPlayerPickOpen(false);
+    setTagMode(true);
+  };
+  const handleStickyTap = (photo: Photo) => {
+    if (!stickyTagKey) {
+      setTagPickerPhoto(photo);
+      return;
+    }
+    void toggleTagForPhoto(photo, stickyTagKey);
   };
 
   // Fetch with a per-item timeout, wired to the batch AbortController so
@@ -1252,9 +1336,9 @@ export default function PublicAlbumView() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setTagMode((v) => !v)}
+                      onClick={() => (tagMode ? exitTagMode() : enterTagMode())}
                       aria-pressed={tagMode}
-                      title="Tag mode: tap photos to tag your player instead of opening them"
+                      title="Tag mode: pick your player once, then tap photos to tag them"
                       className={`px-3 py-1.5 min-h-[32px] rounded-md text-xs font-mono transition cursor-pointer flex items-center gap-1.5 ${
                         tagMode
                           ? "bg-emerald-600 text-white"
@@ -1406,7 +1490,7 @@ export default function PublicAlbumView() {
             <div className="flex items-center justify-center gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setTagMode((v) => !v)}
+                onClick={() => (tagMode ? exitTagMode() : enterTagMode())}
                 aria-pressed={tagMode}
                 className={`inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] rounded-xl text-xs font-bold transition cursor-pointer ${
                   tagMode
@@ -1415,7 +1499,7 @@ export default function PublicAlbumView() {
                 }`}
               >
                 <Tag size={13} />
-                {tagMode ? "Tag mode is on — tap a photo to tag" : "Turn on Tag mode"}
+                {tagMode ? "Tag mode is on — tap photos to tag your player" : "Turn on Tag mode"}
               </button>
               <button
                 type="button"
@@ -1431,6 +1515,35 @@ export default function PublicAlbumView() {
           </div>
         )}
 
+        {/* Phase 2 sticky tag bar: persistent while tag mode is on. Sits at
+            z-40 so the lightbox (z-50) covers it — the lightbox has its own
+            one-tap sticky tag button. */}
+        {tagMode && stickyTagKey && hasAnyClaim && (
+          <div className="fixed top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 pl-3.5 pr-2 py-2 rounded-full bg-emerald-950/95 border border-emerald-700/70 shadow-2xl backdrop-blur-md text-emerald-100 animate-in fade-in slide-in-from-top-2 duration-200 max-w-[94vw]">
+            <Tag size={13} className="text-emerald-400 shrink-0" />
+            <span className="text-xs whitespace-nowrap overflow-hidden text-ellipsis">
+              Tagging: <span className="font-bold text-white">{stickyLabel}</span>
+            </span>
+            <span className="hidden md:inline text-[11px] text-emerald-300/70 whitespace-nowrap">
+              Tap a photo to tag it · tap again to remove
+            </span>
+            <button
+              type="button"
+              onClick={() => setPlayerPickOpen(true)}
+              className="px-2.5 py-1.5 rounded-full bg-emerald-900/80 hover:bg-emerald-800 text-emerald-100 text-[11px] font-semibold transition cursor-pointer shrink-0"
+            >
+              Switch
+            </button>
+            <button
+              type="button"
+              onClick={exitTagMode}
+              className="px-2.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition cursor-pointer shrink-0"
+            >
+              Done
+            </button>
+          </div>
+        )}
+
         {/* Dynamic Masonry Grid (Photos + Video Posters) */}
         <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
           {displayPhotos.map((photo, idx) => {
@@ -1442,10 +1555,12 @@ export default function PublicAlbumView() {
                 key={photo.id}
                 className="break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800/90 hover:border-neutral-700 transition cursor-pointer"
                 onClick={() => {
-                  // Tag mode: tapping a photo opens the tag picker instead
-                  // of the lightbox (claimed visitors only — spec §3).
+                  // Tag mode: tapping a photo applies the sticky player
+                  // instantly — no picker (claimed visitors only).
+                  // With no sticky player chosen yet it falls back to the
+                  // picker for that photo.
                   if (tagMode && hasAnyClaim) {
-                    setTagPickerPhoto(photo);
+                    handleStickyTap(photo);
                   } else {
                     setSelectedIndex(idx);
                   }
@@ -1496,20 +1611,30 @@ export default function PublicAlbumView() {
                   </button>
                 </div>
 
-                {/* Phase 1: tag button (claimed visitors only) */}
+                {/* Phase 1/2: tag button (claimed visitors only). In tag
+                    mode with a sticky player it applies that player
+                    instantly; otherwise it opens the tag picker. */}
                 {hasAnyClaim && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setTagPickerPhoto(photo);
+                      if (tagMode && stickyTagKey) {
+                        handleStickyTap(photo);
+                      } else {
+                        setTagPickerPhoto(photo);
+                      }
                     }}
                     className={`absolute bottom-2 right-2 z-10 inline-flex items-center gap-1 px-2.5 py-2 rounded-full backdrop-blur-md transition cursor-pointer ${
                       tagMode
                         ? "bg-emerald-600 text-white shadow-lg shadow-emerald-950/50 opacity-100"
                         : "bg-black/60 text-white/80 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
                     }`}
-                    title="Tag a player in this photo"
+                    title={
+                      tagMode && stickyTagKey
+                        ? `Tag ${stickyLabel} in this photo`
+                        : "Tag a player in this photo"
+                    }
                     aria-label="Tag a player in this photo"
                   >
                     <Tag size={13} />
@@ -1645,22 +1770,71 @@ export default function PublicAlbumView() {
                 </button>
               </div>
 
-              {/* Phase 1: this photo's player tags (chips) + tag control.
-                  Chips show players, never who tagged them (spec §5). */}
-              {((tagsByPhoto.get(selectedPhoto.id) || []).length > 0 || hasAnyClaim) && (
+              {/* Phase 1/2: this photo's player tags (chips) + tag controls.
+                  Chips show players, never who tagged them (spec §5). AUTO
+                  chips carry an "auto" marker and, for claimed visitors, an
+                  × to remove a wrong machine tag ("Not #12"). In tag mode
+                  a one-tap sticky Tag/Untag button acts on this photo. */}
+              {((tagsByPhoto.get(selectedPhoto.id) || []).length > 0 ||
+                hasAnyClaim ||
+                (tagMode && stickyTagKey)) && (
                 <div
                   className="absolute bottom-4 left-4 z-50 flex flex-wrap items-center gap-1.5 max-w-[75vw]"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {(tagsByPhoto.get(selectedPhoto.id) || []).map((t) => (
-                    <span
-                      key={t.playerKey}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-blue-950/80 border border-blue-800/70 text-blue-100 text-[11px] font-semibold backdrop-blur-md"
+                  {(tagsByPhoto.get(selectedPhoto.id) || []).map((t) => {
+                    const isAuto = t.source === "auto";
+                    const removable = isAuto && hasAnyClaim;
+                    return (
+                      <span
+                        key={t.playerKey}
+                        className={`inline-flex items-center gap-1 pl-2.5 ${removable ? "pr-1.5" : "pr-2.5"} py-1.5 rounded-full border text-[11px] font-semibold backdrop-blur-md ${
+                          isAuto
+                            ? "bg-amber-950/80 border-amber-800/70 text-amber-100"
+                            : "bg-blue-950/80 border-blue-800/70 text-blue-100"
+                        }`}
+                      >
+                        <Tag size={10} />
+                        {playerKeyLabel(t.playerKey, siteConfig.rosters)}
+                        {isAuto && (
+                          <span className="text-[9px] font-mono uppercase text-amber-300/80">
+                            auto
+                          </span>
+                        )}
+                        {removable && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void toggleTagForPhoto(selectedPhoto, t.playerKey);
+                            }}
+                            className="p-0.5 rounded-full text-amber-200/70 hover:text-white hover:bg-amber-800/60 transition cursor-pointer"
+                            title={`Not ${playerKeyLabel(t.playerKey, siteConfig.rosters)}? Remove this auto tag`}
+                            aria-label={`Remove auto tag ${playerKeyLabel(t.playerKey, siteConfig.rosters)}`}
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                  {tagMode && stickyTagKey && hasAnyClaim && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void toggleTagForPhoto(selectedPhoto, stickyTagKey);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[32px] rounded-full bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 text-white text-[11px] font-bold backdrop-blur-md transition cursor-pointer"
                     >
                       <Tag size={10} />
-                      {playerKeyLabel(t.playerKey, siteConfig.rosters)}
-                    </span>
-                  ))}
+                      {(tagsByPhoto.get(selectedPhoto.id) || []).some(
+                        (t) => t.playerKey === stickyTagKey
+                      )
+                        ? `Untag ${stickyShortLabel}`
+                        : `Tag ${stickyShortLabel}`}
+                    </button>
+                  )}
                   {hasAnyClaim && (
                     <button
                       type="button"
@@ -2104,6 +2278,19 @@ export default function PublicAlbumView() {
         visitorId={visitorProfile?.id || ""}
         onToggle={handleTagToggle}
         onClose={() => setTagPickerPhoto(null)}
+      />
+
+      {/* Phase 2: tag mode's one-time sticky player pick (and Switch). */}
+      <TagPlayerPicker
+        open={playerPickOpen}
+        options={tagOptions}
+        currentKey={stickyTagKey}
+        onPick={handlePlayerPick}
+        onClose={() => {
+          setPlayerPickOpen(false);
+          // Cancelling the FIRST pick (nothing chosen yet) leaves tag mode.
+          if (!stickyTagKey) setTagMode(false);
+        }}
       />
 
       <ShareSheet

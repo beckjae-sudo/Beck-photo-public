@@ -840,6 +840,15 @@ export async function adminRemoveAlbumTag(
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
+/** Whether auto-tagging is configured (GEMINI_API_KEY present). Lets
+ *  admin surfaces that don't load an album's audience (e.g. the category
+ *  sweep) show the not-configured state up front instead of mid-run. */
+export async function getAutoTagConfig(): Promise<{ configured: boolean }> {
+  const isAuth = await checkAdminAuth();
+  if (!isAuth) return { configured: false };
+  return { configured: Boolean(process.env.GEMINI_API_KEY?.trim()) };
+}
+
 export interface AutoTagPhotoResult {
   success: boolean;
   configured: boolean;

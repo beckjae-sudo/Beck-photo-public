@@ -13,7 +13,7 @@ import {
   renameCategory,
   deleteCategory,
 } from "@/app/admin/actions";
-import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
+import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig, RosterPlayer } from "@/lib/types";
 import { FONT_OPTIONS, fontVariableFor } from "@/lib/fonts";
 import { processImageInBrowser, ProcessedPhoto } from "@/lib/clientImageProcessor";
 import {
@@ -589,6 +589,80 @@ export default function AdminStudioView() {
     } finally {
       setCategoryBusy(false);
     }
+  };
+
+  // ---------- Rosters (Phase 1: per-category player lists) ----------
+  // Roster edits live in siteConfig state and persist via the settings
+  // tab's Save Settings button, like every other field on this tab.
+  const [rosterDrafts, setRosterDrafts] = useState<Record<string, { number: string; name: string }>>({});
+  const [rosterBulk, setRosterBulk] = useState<Record<string, string>>({});
+
+  const rosterKeyFor = (cat: string): string | undefined =>
+    Object.keys(siteConfig.rosters || {}).find(
+      (k) => k.trim().toLowerCase() === cat.trim().toLowerCase()
+    );
+
+  const rosterOf = (cat: string): RosterPlayer[] => {
+    const key = rosterKeyFor(cat);
+    return key ? siteConfig.rosters[key] : [];
+  };
+
+  const setRosterFor = (cat: string, players: RosterPlayer[]) => {
+    setSiteConfig((prev) => {
+      const existingKey = Object.keys(prev.rosters || {}).find(
+        (k) => k.trim().toLowerCase() === cat.trim().toLowerCase()
+      );
+      const rosters = { ...(prev.rosters || {}) };
+      if (existingKey && existingKey !== cat) delete rosters[existingKey];
+      rosters[cat] = players;
+      return { ...prev, rosters };
+    });
+  };
+
+  const updateRosterPlayer = (cat: string, idx: number, patch: Partial<RosterPlayer>) => {
+    setRosterFor(cat, rosterOf(cat).map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  };
+
+  const removeRosterPlayer = (cat: string, idx: number) => {
+    setRosterFor(cat, rosterOf(cat).filter((_, i) => i !== idx));
+  };
+
+  const moveRosterPlayer = (cat: string, idx: number, dir: -1 | 1) => {
+    const list = [...rosterOf(cat)];
+    const to = idx + dir;
+    if (to < 0 || to >= list.length) return;
+    const [moved] = list.splice(idx, 1);
+    list.splice(to, 0, moved);
+    setRosterFor(cat, list);
+  };
+
+  const addRosterPlayer = (cat: string) => {
+    const draft = rosterDrafts[cat] || { number: "", name: "" };
+    const number = draft.number.trim();
+    if (!number) return;
+    const name = draft.name.trim();
+    setRosterFor(cat, [
+      ...rosterOf(cat),
+      { number, ...(name ? { name } : {}), active: true },
+    ]);
+    setRosterDrafts((prev) => ({ ...prev, [cat]: { number: "", name: "" } }));
+  };
+
+  const bulkAddRoster = (cat: string) => {
+    const text = rosterBulk[cat] || "";
+    const additions: RosterPlayer[] = [];
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const [numPart, ...nameParts] = trimmed.split(/[,\t]/);
+      const number = (numPart || "").replace(/^#/, "").trim();
+      if (!number) continue;
+      const name = nameParts.join(",").trim();
+      additions.push({ number, ...(name ? { name } : {}), active: true });
+    }
+    if (additions.length === 0) return;
+    setRosterFor(cat, [...rosterOf(cat), ...additions]);
+    setRosterBulk((prev) => ({ ...prev, [cat]: "" }));
   };
 
   if (isAuthenticated === null) {
@@ -1363,6 +1437,161 @@ export default function AdminStudioView() {
                 >
                   <Plus size={15} /> Add
                 </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Team Rosters</h3>
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                Rosters power the visitor &quot;Pick your player&quot; list and photo
+                tagging (Phase 1). One roster per category: jersey number required,
+                name optional. Removing a player here never deletes existing tags
+                or visitor claims. Roster changes save with the{" "}
+                <span className="text-neutral-300 font-semibold">Save Settings</span>{" "}
+                button at the bottom of this tab.
+              </p>
+              <div className="space-y-4">
+                {siteConfig.categories.map((cat) => {
+                  const players = rosterOf(cat);
+                  const draft = rosterDrafts[cat] || { number: "", name: "" };
+                  return (
+                    <div key={cat} className="border border-neutral-800 rounded-xl p-3.5 space-y-2.5 bg-neutral-950/60">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-white">{cat}</p>
+                        <span className="text-[11px] font-mono text-neutral-500">
+                          {players.length} {players.length === 1 ? "player" : "players"}
+                        </span>
+                      </div>
+
+                      {players.map((p, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-neutral-500 text-xs font-mono">#</span>
+                          <input
+                            type="text"
+                            value={p.number}
+                            onChange={(e) => updateRosterPlayer(cat, idx, { number: e.target.value })}
+                            className="w-16 px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded-md text-sm text-white focus:outline-none focus:border-blue-500"
+                            aria-label={`Jersey number for player ${idx + 1} in ${cat}`}
+                          />
+                          <input
+                            type="text"
+                            value={p.name || ""}
+                            onChange={(e) =>
+                              updateRosterPlayer(cat, idx, { name: e.target.value })
+                            }
+                            placeholder="Player name (optional)"
+                            className="flex-1 min-w-0 px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded-md text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-blue-500"
+                            aria-label={`Name for #${p.number} in ${cat}`}
+                          />
+                          <label className="flex items-center gap-1.5 text-[11px] text-neutral-400 cursor-pointer shrink-0">
+                            <input
+                              type="checkbox"
+                              checked={p.active}
+                              onChange={(e) =>
+                                updateRosterPlayer(cat, idx, { active: e.target.checked })
+                              }
+                              className="accent-blue-500"
+                            />
+                            Active
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => moveRosterPlayer(cat, idx, -1)}
+                            disabled={idx === 0}
+                            className="p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-white transition cursor-pointer disabled:opacity-30"
+                            title="Move up"
+                          >
+                            <ChevronLeft size={14} className="rotate-90" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveRosterPlayer(cat, idx, 1)}
+                            disabled={idx === players.length - 1}
+                            className="p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-white transition cursor-pointer disabled:opacity-30"
+                            title="Move down"
+                          >
+                            <ChevronRight size={14} className="rotate-90" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeRosterPlayer(cat, idx)}
+                            className="p-1.5 rounded-md text-neutral-400 hover:bg-neutral-800 hover:text-red-400 transition cursor-pointer"
+                            title={`Remove #${p.number} from the ${cat} roster`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-neutral-500 text-xs font-mono">#</span>
+                        <input
+                          type="text"
+                          value={draft.number}
+                          onChange={(e) =>
+                            setRosterDrafts((prev) => ({
+                              ...prev,
+                              [cat]: { ...draft, number: e.target.value },
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") addRosterPlayer(cat);
+                          }}
+                          placeholder="No."
+                          className="w-16 px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded-md text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-blue-500"
+                          aria-label={`New jersey number for ${cat}`}
+                        />
+                        <input
+                          type="text"
+                          value={draft.name}
+                          onChange={(e) =>
+                            setRosterDrafts((prev) => ({
+                              ...prev,
+                              [cat]: { ...draft, name: e.target.value },
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") addRosterPlayer(cat);
+                          }}
+                          placeholder="Name (optional)"
+                          className="flex-1 min-w-0 px-2 py-1.5 bg-neutral-900 border border-neutral-800 rounded-md text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-blue-500"
+                          aria-label={`New player name for ${cat}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addRosterPlayer(cat)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer shrink-0"
+                        >
+                          <Plus size={13} /> Add
+                        </button>
+                      </div>
+
+                      <details className="pt-1">
+                        <summary className="text-[11px] text-neutral-400 hover:text-neutral-200 cursor-pointer select-none">
+                          Paste a whole roster (one per line: <span className="font-mono">12, Walker</span>)
+                        </summary>
+                        <div className="pt-2 space-y-2">
+                          <textarea
+                            value={rosterBulk[cat] || ""}
+                            onChange={(e) =>
+                              setRosterBulk((prev) => ({ ...prev, [cat]: e.target.value }))
+                            }
+                            rows={5}
+                            placeholder={"12, Walker\n7, Chen\n23, Okafor"}
+                            className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-blue-500 font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => bulkAddRoster(cat)}
+                            className="px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold transition cursor-pointer"
+                          >
+                            Add all lines
+                          </button>
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

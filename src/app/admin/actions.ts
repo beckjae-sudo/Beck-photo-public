@@ -339,6 +339,35 @@ export async function getDirectUploadUrl(
   }
 }
 
+/**
+ * Fail-closed category check for album create/edit: the submitted category
+ * must be one of the site's canonical categories (site_config_public.json).
+ * Returns the canonical-cased category name on success.
+ */
+async function validateAlbumCategory(
+  category?: string
+): Promise<{ ok: true; category: string } | { ok: false; error: string }> {
+  const submitted = String(category || "").trim();
+  if (!submitted) {
+    return {
+      ok: false,
+      error:
+        "No category was chosen for this album. Pick one of the site's categories — an album can't be saved without one.",
+    };
+  }
+  const config = await getPublicSiteConfig();
+  const match = config.categories.find(
+    (c) => c.trim().toLowerCase() === submitted.toLowerCase()
+  );
+  if (!match) {
+    return {
+      ok: false,
+      error: `"${submitted}" isn't one of the site's categories, so this album would be hidden from the public site. Pick a category from the site's category list instead.`,
+    };
+  }
+  return { ok: true, category: match };
+}
+
 export async function createAlbum(albumData: {
   album_id: string;
   title: string;
@@ -351,6 +380,10 @@ export async function createAlbum(albumData: {
     const isAuth = await checkAdminAuth();
     if (!isAuth) return { success: false, error: "Admin session expired. Please log in again." };
 
+    const categoryCheck = await validateAlbumCategory(albumData.category);
+    if (!categoryCheck.ok) return { success: false, error: categoryCheck.error };
+    const category = categoryCheck.category;
+
     const r2 = getR2WriteClient();
 
     // 1. Save album manifest
@@ -358,7 +391,7 @@ export async function createAlbum(albumData: {
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: `${albumData.album_id}/manifest.json`,
-        Body: JSON.stringify(albumData, null, 2),
+        Body: JSON.stringify({ ...albumData, category }, null, 2),
         ContentType: "application/json",
       })
     );
@@ -379,7 +412,7 @@ export async function createAlbum(albumData: {
       id: albumData.album_id,
       title: albumData.title,
       date: albumData.date,
-      category: albumData.category || "School Sports",
+      category,
       photo_count: albumData.photos.length,
       cover_url: albumData.cover_url,
     };
@@ -413,13 +446,17 @@ export async function updateExistingAlbum(albumData: {
     const isAuth = await checkAdminAuth();
     if (!isAuth) return { success: false, error: "Admin session expired." };
 
+    const categoryCheck = await validateAlbumCategory(albumData.category);
+    if (!categoryCheck.ok) return { success: false, error: categoryCheck.error };
+    const category = categoryCheck.category;
+
     const r2 = getR2WriteClient();
 
     await r2.send(
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: `${albumData.album_id}/manifest.json`,
-        Body: JSON.stringify(albumData, null, 2),
+        Body: JSON.stringify({ ...albumData, category }, null, 2),
         ContentType: "application/json",
       })
     );
@@ -441,7 +478,7 @@ export async function updateExistingAlbum(albumData: {
           ...a,
           title: albumData.title,
           date: albumData.date,
-          category: albumData.category || "School Sports",
+          category,
           photo_count: albumData.photos.length,
           cover_url: albumData.cover_url,
         };

@@ -58,7 +58,7 @@ export default function AdminStudioView() {
 
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
-  const [category, setCategory] = useState("School Sports");
+  const [category, setCategory] = useState("");
   const [photos, setPhotos] = useState<ProcessedPhoto[]>([]);
   const [coverPhotoUid, setCoverPhotoUid] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
@@ -69,6 +69,7 @@ export default function AdminStudioView() {
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(DEFAULT_PUBLIC_CONFIG);
+  const [configLoadFailed, setConfigLoadFailed] = useState(false);
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
@@ -144,15 +145,16 @@ export default function AdminStudioView() {
         }
         const discovered = [...seen.values()].sort();
         setAllCategories(discovered);
-        if (discovered.length > 0) {
-          setCategory((prev) => prev || discovered[0]);
-        }
       }
       if (configRes.ok) {
         const cfg = await configRes.json();
         setSiteConfig({ ...DEFAULT_PUBLIC_CONFIG, ...cfg });
+        setConfigLoadFailed(false);
+      } else {
+        setConfigLoadFailed(true);
       }
     } catch (e) {
+      setConfigLoadFailed(true);
       console.error("Error loading admin data:", e);
     } finally {
       setLoadingAlbums(false);
@@ -337,6 +339,11 @@ export default function AdminStudioView() {
 
   const handleCreateAlbum = async () => {
     if (!title.trim()) return alert("Please enter an Album Title.");
+    if (!category.trim()) return alert("Please choose a category for this album.");
+    if (!siteConfig.categories.includes(category))
+      return alert(
+        `"${category}" isn't one of the site's categories. Please choose a category from the list.`
+      );
     if (photos.length === 0) return alert("Please select at least one photo or video.");
 
     setIsUploading(true);
@@ -418,6 +425,7 @@ export default function AdminStudioView() {
 
       setTitle("");
       setDate("");
+      setCategory("");
       setPhotos([]);
       setCoverPhotoUid("");
       alert("Album successfully created and published!");
@@ -687,19 +695,25 @@ export default function AdminStudioView() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-neutral-300">Category / Group</label>
-                  <input
-                    type="text"
-                    list="pub-category-suggestions"
-                    placeholder="e.g. School Sports"
+                  <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600"
-                  />
-                  <datalist id="pub-category-suggestions">
+                    disabled={configLoadFailed || siteConfig.categories.length === 0}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white text-sm focus:outline-none focus:border-neutral-600 disabled:opacity-50"
+                  >
+                    <option value="">Choose a category…</option>
                     {siteConfig.categories.map((cat) => (
-                      <option key={cat} value={cat} />
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
                     ))}
-                  </datalist>
+                  </select>
+                  {(configLoadFailed || siteConfig.categories.length === 0) && (
+                    <p className="text-[11px] text-amber-400">
+                      The site&apos;s category list couldn&apos;t be loaded, so a category
+                      can&apos;t be chosen right now. Reload the page before creating an album.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-neutral-300">Event Date</label>
@@ -1058,7 +1072,7 @@ export default function AdminStudioView() {
                         </div>
                         <div className="truncate">
                           <p className="text-xs font-semibold text-white truncate">{album.title}</p>
-                          <p className="text-[11px] text-neutral-400">{album.category || "School Sports"} • {album.photo_count} items</p>
+                          <p className="text-[11px] text-neutral-400">{album.category || "Uncategorized"} • {album.photo_count} items</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">

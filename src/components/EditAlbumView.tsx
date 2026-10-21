@@ -75,7 +75,8 @@ export default function EditAlbumView() {
 
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
-  const [category, setCategory] = useState("School Sports");
+  const [category, setCategory] = useState("");
+  const [siteCategories, setSiteCategories] = useState<string[]>([]);
   const [coverUrl, setCoverUrl] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [newPhotos, setNewPhotos] = useState<ProcessedPhoto[]>([]);
@@ -116,9 +117,30 @@ export default function EditAlbumView() {
         setAlbum(data);
         setTitle(data.title || "");
         setDate(data.date || "");
-        setCategory(data.category || "School Sports");
+        setCategory(data.category || "");
         setCoverUrl(data.cover_url || data.photos?.[0]?.urls?.thumb || "");
         setPhotos(data.photos || []);
+
+        // Load the site's canonical category list for the category picker.
+        // If this fails, the picker keeps only the album's current category
+        // (labeled as not-a-site-category) — it never invents options.
+        try {
+          const cfgRes = await fetch(`${baseUrl}/site_config_public.json`, {
+            cache: "no-store",
+          });
+          if (cfgRes.ok) {
+            const cfg = await cfgRes.json();
+            if (Array.isArray(cfg?.categories)) {
+              setSiteCategories(
+                cfg.categories
+                  .map((c: any) => String(c || "").trim())
+                  .filter(Boolean)
+              );
+            }
+          }
+        } catch {
+          // Leave siteCategories empty; the current-category option still shows.
+        }
       } catch (err: any) {
         setErrorMessage(err.message || "Failed to load album.");
       } finally {
@@ -211,6 +233,19 @@ export default function EditAlbumView() {
 
   const handleSaveAllChanges = async () => {
     if (!album) return;
+
+    // Fail closed on category before uploading anything: the server only
+    // accepts categories from the site's canonical list.
+    if (!category.trim())
+      return alert("Please choose a category for this album before saving.");
+    if (
+      siteCategories.length > 0 &&
+      !siteCategories.some((c) => c.toLowerCase() === category.trim().toLowerCase())
+    )
+      return alert(
+        `"${category}" isn't one of the site's categories, so this album would stay hidden from the public site. Pick a category from the list before saving.`
+      );
+
     setIsSaving(true);
 
     const baseUrl = process.env.NEXT_PUBLIC_R2_BASE_URL?.replace(/\/$/, "");
@@ -378,6 +413,45 @@ export default function EditAlbumView() {
               onChange={(e) => setDate(e.target.value)}
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
             />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-neutral-400">Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              {category &&
+                !siteCategories.some(
+                  (c) => c.toLowerCase() === category.trim().toLowerCase()
+                ) && (
+                  <option value={category}>
+                    {category} (current — not a site category)
+                  </option>
+                )}
+              {siteCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+            {category &&
+              siteCategories.length > 0 &&
+              !siteCategories.some(
+                (c) => c.toLowerCase() === category.trim().toLowerCase()
+              ) && (
+                <p className="text-[11px] text-amber-400">
+                  This album&apos;s current category isn&apos;t in the site&apos;s category
+                  list, so the album is hidden from the public site. Pick a category above
+                  and save to move it.
+                </p>
+              )}
+            {siteCategories.length === 0 && (
+              <p className="text-[11px] text-amber-400">
+                The site&apos;s category list couldn&apos;t be loaded. Reload the page
+                before changing this album&apos;s category.
+              </p>
+            )}
           </div>
         </div>
 

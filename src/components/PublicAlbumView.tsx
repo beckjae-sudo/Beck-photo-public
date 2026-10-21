@@ -25,10 +25,31 @@ import {
   Square,
   Package,
   Play,
+  Tag,
+  UserRound,
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareSheet from "@/components/ShareSheet";
 import ViewerPresenceBadge from "@/components/ViewerPresenceBadge";
+import ClaimModal from "@/components/ClaimModal";
+import TagPicker from "@/components/TagPicker";
+import {
+  getOrCreateVisitorProfile,
+  onVisitorProfileChange,
+  VisitorProfile,
+} from "@/lib/visitorIdentity";
+import {
+  buildPlayerOptions,
+  playerKeyLabel,
+  rosterForCategory,
+} from "@/lib/players";
+import {
+  addAlbumTag,
+  getAlbumTags,
+  removeAlbumTag,
+  TagRecord,
+} from "@/app/actions/tags";
+import { recordAlbumActivity } from "@/app/actions/presence";
 import {
   DEFAULT_PUBLIC_CONFIG,
   PublicSiteConfig,
@@ -149,6 +170,43 @@ export default function PublicAlbumView() {
     } catch {}
   }, []);
 
+  // ---- Phase 1: claimed identity, player tags, My Player view ----
+  const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
+  const [albumTags, setAlbumTags] = useState<TagRecord[]>([]);
+  const [viewMode, setViewMode] = useState<"all" | "my">("all");
+  const [subFilterKey, setSubFilterKey] = useState<string | null>(null);
+  const [claimModalOpen, setClaimModalOpen] = useState(false);
+  const [tagMode, setTagMode] = useState(false);
+  const [tagPickerPhoto, setTagPickerPhoto] = useState<Photo | null>(null);
+  const [claimCardDismissed, setClaimCardDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("bpp-claim-card-dismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const dismissClaimCard = useCallback(() => {
+    setClaimCardDismissed(true);
+    try {
+      localStorage.setItem("bpp-claim-card-dismissed", "1");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    setVisitorProfile(getOrCreateVisitorProfile());
+    return onVisitorProfileChange(setVisitorProfile);
+  }, []);
+
+  useEffect(() => {
+    if (!albumId) return;
+    getAlbumTags(albumId)
+      .then((res) => {
+        if (res.success) setAlbumTags(res.tags);
+      })
+      .catch(() => {});
+  }, [albumId]);
+
   // Fullscreen, Drag, Pan & Pinch Zoom State
   const [isImmersive, setIsImmersive] = useState(false);
   const [navCue, setNavCue] = useState<"both" | "left" | "right" | "none">("none");
@@ -177,7 +235,65 @@ export default function PublicAlbumView() {
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const photos = album?.photos || [];
-  const selectedPhoto = selectedIndex !== null ? photos[selectedIndex] : null;
+
+  // ---- Phase 1 derived state ----
+  const category = album?.category || "";
+  const myClaims = useMemo(
+    () =>
+      category
+        ? (visitorProfile?.claims || []).filter(
+            (c) => c.category.trim().toLowerCase() === category.trim().toLowerCase()
+          )
+        : [],
+    [visitorProfile, category]
+  );
+  const hasAnyClaim = (visitorProfile?.claims || []).length > 0;
+  const tagsByPhoto = useMemo(() => {
+    const m = new Map<string, TagRecord[]>();
+    for (const t of albumTags) {
+      const arr = m.get(t.photoId) || [];
+      arr.push(t);
+      m.set(t.photoId, arr);
+    }
+    return m;
+  }, [albumTags]);
+  const activeFilterKeys = useMemo(
+    () =>
+      subFilterKey
+        ? new Set([subFilterKey])
+        : new Set(myClaims.map((c) => c.playerKey)),
+    [subFilterKey, myClaims]
+  );
+  const myPlayerPhotos = useMemo(
+    () =>
+      photos.filter((p) =>
+        (tagsByPhoto.get(p.id) || []).some((t) => activeFilterKeys.has(t.playerKey))
+      ),
+    [photos, tagsByPhoto, activeFilterKeys]
+  );
+  // The grid/lightbox work off displayPhotos. In My Player view that's the
+  // tagged subset — except in tag mode with an empty subset, where we browse
+  // the full album to build the view (spec §3 cold start).
+  const displayPhotos =
+    viewMode === "my" && !(tagMode && myPlayerPhotos.length === 0)
+      ? myPlayerPhotos
+      : photos;
+  const allDisplaySelected =
+    displayPhotos.length > 0 && displayPhotos.every((p) => selectedIds.has(p.id));
+  const tagOptions = useMemo(
+    () => buildPlayerOptions(category, siteConfig.rosters, visitorProfile?.claims || []),
+    [category, siteConfig.rosters, visitorProfile]
+  );
+
+  // If the last claim for this album goes away, the My Player view goes too.
+  useEffect(() => {
+    if (viewMode === "my" && myClaims.length === 0) {
+      setViewMode("all");
+      setSubFilterKey(null);
+    }
+  }, [viewMode, myClaims.length]);
+
+  const selectedPhoto = selectedIndex !== null ? displayPhotos[selectedIndex] : null;
 
   // Reset zoom & pan synchronously when changing media or closing
   useEffect(() => {
@@ -217,16 +333,16 @@ export default function PublicAlbumView() {
   //  2. The current photo's original loads at low priority in the background;
   //     it's only needed for zoom sharpness, never for navigation.
   useEffect(() => {
-    if (selectedIndex === null || !selectedPhoto || photos.length === 0) return;
+    if (selectedIndex === null || !selectedPhoto || displayPhotos.length === 0) return;
     if (selectedPhoto.type === "video") return;
 
     const adjacentIdx = [
-      (selectedIndex + 1) % photos.length,
-      (selectedIndex - 1 + photos.length) % photos.length,
-      (selectedIndex + 2) % photos.length,
+      (selectedIndex + 1) % displayPhotos.length,
+      (selectedIndex - 1 + displayPhotos.length) % displayPhotos.length,
+      (selectedIndex + 2) % displayPhotos.length,
     ];
     adjacentIdx.forEach((idx) => {
-      const item = photos[idx];
+      const item = displayPhotos[idx];
       if (item?.urls?.display && item.type !== "video") {
         const img = new Image();
         img.setAttribute("fetchpriority", "high");
@@ -235,7 +351,7 @@ export default function PublicAlbumView() {
     });
 
     ensureHighRes(selectedPhoto, "low");
-  }, [selectedIndex, selectedPhoto, photos, ensureHighRes]);
+  }, [selectedIndex, selectedPhoto, displayPhotos, ensureHighRes]);
 
   // True on mouse-capable devices (desktop). Click-to-navigate zones are
   // only rendered here so mobile tap/swipe behavior is completely untouched.
@@ -553,11 +669,45 @@ export default function PublicAlbumView() {
 
   const handleSelectAll = () => {
     if (!album) return;
-    if (selectedIds.size === album.photos.length) {
-      setSelectedIds(new Set());
+    // Operates on the currently displayed set — in My Player view that's
+    // the filtered set (spec §4); in All view it's the whole album, as before.
+    if (allDisplaySelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        displayPhotos.forEach((p) => next.delete(p.id));
+        return next;
+      });
     } else {
-      setSelectedIds(new Set(album.photos.map((p) => p.id)));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        displayPhotos.forEach((p) => next.add(p.id));
+        return next;
+      });
       dismissSelectHint();
+    }
+  };
+
+  // Phase 1 tag toggle: add/remove via the tags actions; the server returns
+  // the album's full updated tag list, which becomes the new local state.
+  const handleTagToggle = async (playerKey: string, currentlyTagged: boolean) => {
+    if (!tagPickerPhoto || !visitorProfile) return;
+    if (currentlyTagged) {
+      const res = await removeAlbumTag(albumId, {
+        photoId: tagPickerPhoto.id,
+        playerKey,
+        visitorId: visitorProfile.id,
+      });
+      if (res.success) setAlbumTags(res.tags);
+    } else {
+      const res = await addAlbumTag(albumId, {
+        photoId: tagPickerPhoto.id,
+        playerKey,
+        visitorId: visitorProfile.id,
+      });
+      if (res.success) {
+        setAlbumTags(res.tags);
+        recordAlbumActivity(albumId, visitorProfile.id, { tagsMade: 1 }).catch(() => {});
+      }
     }
   };
 
@@ -708,6 +858,17 @@ export default function PublicAlbumView() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
+      // Phase 1 activity: log the delivered file count to this visitor's
+      // presence record (counts only, never filenames — spec §5).
+      const deliveredCount = targetPhotos.length - failedNames.length;
+      if (deliveredCount > 0) {
+        try {
+          recordAlbumActivity(albumId, getOrCreateVisitorProfile().id, {
+            downloads: deliveredCount,
+          }).catch(() => {});
+        } catch {}
+      }
+
       if (failedNames.length > 0) {
         fail(
           `Saved the ZIP, but ${failedNames.length} of ${targetPhotos.length} items couldn't be added. You can retry to get the rest.`
@@ -823,6 +984,11 @@ export default function PublicAlbumView() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
       setShowDownloadToast(true);
+      try {
+        recordAlbumActivity(albumId, getOrCreateVisitorProfile().id, {
+          downloads: 1,
+        }).catch(() => {});
+      } catch {}
     } catch (err) {
       // Show the guidance FIRST (before opening the tab) so the user actually
       // sees it, and include the technical reason to aid diagnosis.
@@ -880,14 +1046,14 @@ export default function PublicAlbumView() {
   };
 
   const showNext = useCallback(() => {
-    if (selectedIndex === null || photos.length === 0) return;
-    setSelectedIndex((prev) => (prev !== null && prev < photos.length - 1 ? prev + 1 : 0));
-  }, [selectedIndex, photos.length]);
+    if (selectedIndex === null || displayPhotos.length === 0) return;
+    setSelectedIndex((prev) => (prev !== null && prev < displayPhotos.length - 1 ? prev + 1 : 0));
+  }, [selectedIndex, displayPhotos.length]);
 
   const showPrev = useCallback(() => {
-    if (selectedIndex === null || photos.length === 0) return;
-    setSelectedIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : photos.length - 1));
-  }, [selectedIndex, photos.length]);
+    if (selectedIndex === null || displayPhotos.length === 0) return;
+    setSelectedIndex((prev) => (prev !== null && prev > 0 ? prev - 1 : displayPhotos.length - 1));
+  }, [selectedIndex, displayPhotos.length]);
 
   useEffect(() => {
     if (selectedIndex === null) return;
@@ -1040,22 +1206,164 @@ export default function PublicAlbumView() {
                 className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
                 title="Select every photo in this album for download"
               >
-                {selectedIds.size === photos.length ? (
+                {allDisplaySelected ? (
                   <CheckSquare size={13} className="text-pink-400" />
                 ) : (
                   <Square size={13} />
                 )}
                 <span>
-                  {selectedIds.size === photos.length ? "Deselect All" : "Select All for Download"}
+                  {allDisplaySelected ? "Deselect All" : "Select All for Download"}
                 </span>
               </button>
+
+              {/* Phase 1: My Player entry point / view toggle (claimed only
+                  for the toggle; the button itself is the claim invitation) */}
+              {category &&
+                (myClaims.length > 0 ? (
+                  <div className="flex items-center gap-1 p-1 rounded-lg bg-neutral-900/80 border border-neutral-800 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewMode("all");
+                        setSelectedIndex(null);
+                      }}
+                      className={`px-3 py-1.5 min-h-[32px] rounded-md text-xs font-mono transition cursor-pointer ${
+                        viewMode === "all"
+                          ? "bg-neutral-700 text-white"
+                          : "text-neutral-400 hover:text-white"
+                      }`}
+                    >
+                      All photos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewMode("my");
+                        setSelectedIndex(null);
+                      }}
+                      className={`px-3 py-1.5 min-h-[32px] rounded-md text-xs font-mono transition cursor-pointer flex items-center gap-1.5 ${
+                        viewMode === "my"
+                          ? "bg-blue-600 text-white"
+                          : "text-neutral-400 hover:text-white"
+                      }`}
+                    >
+                      <UserRound size={12} />
+                      My Player
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTagMode((v) => !v)}
+                      aria-pressed={tagMode}
+                      title="Tag mode: tap photos to tag your player instead of opening them"
+                      className={`px-3 py-1.5 min-h-[32px] rounded-md text-xs font-mono transition cursor-pointer flex items-center gap-1.5 ${
+                        tagMode
+                          ? "bg-emerald-600 text-white"
+                          : "text-neutral-400 hover:text-white"
+                      }`}
+                    >
+                      <Tag size={12} />
+                      Tag mode
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setClaimModalOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-mono text-neutral-300 hover:text-white transition py-2 px-3 min-h-[40px] rounded-lg bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 cursor-pointer shadow-sm"
+                    title="Pick your player to see only their photos"
+                  >
+                    <UserRound size={13} className="text-blue-400" />
+                    <span>My Player</span>
+                  </button>
+                ))}
             </div>
 
           </div>
+
+          {/* My Player status line + multi-player sub-filter */}
+          {viewMode === "my" && myClaims.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-neutral-300 font-mono">
+                {myPlayerPhotos.length} of {photos.length} photos feature{" "}
+                {subFilterKey
+                  ? playerKeyLabel(subFilterKey, siteConfig.rosters)
+                  : myClaims
+                      .map((c) => playerKeyLabel(c.playerKey, siteConfig.rosters))
+                      .join(", ")}
+              </span>
+              {myClaims.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubFilterKey(null);
+                      setSelectedIndex(null);
+                    }}
+                    className={`px-2.5 py-1.5 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                      subFilterKey === null
+                        ? "bg-blue-600 border-blue-500 text-white"
+                        : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    All my players
+                  </button>
+                  {myClaims.map((c) => (
+                    <button
+                      key={c.playerKey}
+                      type="button"
+                      onClick={() => {
+                        setSubFilterKey(c.playerKey);
+                        setSelectedIndex(null);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                        subFilterKey === c.playerKey
+                          ? "bg-blue-600 border-blue-500 text-white"
+                          : "bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white"
+                      }`}
+                    >
+                      {playerKeyLabel(c.playerKey, siteConfig.rosters)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
+        {/* Phase 1 claim invitation — unclaimed visitors only, dismissible
+            and remembered; never blocks anything (spec §1). */}
+        {category && myClaims.length === 0 && !claimCardDismissed && (
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl bg-blue-950/40 border border-blue-800/50 text-blue-100">
+            <UserRound size={16} className="text-blue-400 shrink-0" />
+            <p className="text-xs flex-1 min-w-[200px] leading-relaxed">
+              Here for a player?{" "}
+              <span className="text-blue-200/75">
+                Pick your player and see only their photos — and download just those.
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setClaimModalOpen(true)}
+              className="px-4 py-2 min-h-[40px] rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-950/40 transition cursor-pointer"
+            >
+              Pick your player
+            </button>
+            <button
+              type="button"
+              onClick={dismissClaimCard}
+              className="p-1.5 rounded-lg text-blue-300/70 hover:text-blue-100 hover:bg-blue-900/50 transition cursor-pointer"
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         <div className="max-w-7xl mx-auto px-6">
-          <ViewerPresenceBadge albumId={albumId} />
+          <ViewerPresenceBadge
+            albumId={albumId}
+            onOpenClaim={() => setClaimModalOpen(true)}
+          />
         </div>
 
         {/* One-time hint: how photo selection works */}
@@ -1077,9 +1385,55 @@ export default function PublicAlbumView() {
           </div>
         )}
 
+        {/* My Player cold-start empty state (spec §3): no tags yet for the
+            claimed player(s). Tag mode keeps the full album browsable below
+            so the first tagger can build the view. */}
+        {viewMode === "my" && myPlayerPhotos.length === 0 && (
+          <div className="px-5 py-6 rounded-xl bg-neutral-900/70 border border-neutral-800 text-center space-y-3">
+            <p className="text-sm text-neutral-200 font-semibold">
+              No one&apos;s tagged{" "}
+              {subFilterKey
+                ? playerKeyLabel(subFilterKey, siteConfig.rosters)
+                : myClaims
+                    .map((c) => playerKeyLabel(c.playerKey, siteConfig.rosters))
+                    .join(" or ")}{" "}
+              yet.
+            </p>
+            <p className="text-xs text-neutral-400 leading-relaxed max-w-md mx-auto">
+              Tap &quot;Tag player&quot; on any photo of them and this view builds
+              itself — every later visitor gets the filtered album instantly.
+            </p>
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setTagMode((v) => !v)}
+                aria-pressed={tagMode}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 min-h-[40px] rounded-xl text-xs font-bold transition cursor-pointer ${
+                  tagMode
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    : "bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
+                }`}
+              >
+                <Tag size={13} />
+                {tagMode ? "Tag mode is on — tap a photo to tag" : "Turn on Tag mode"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewMode("all");
+                  setSelectedIndex(null);
+                }}
+                className="px-4 py-2 min-h-[40px] rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold transition cursor-pointer"
+              >
+                Browse all photos
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Dynamic Masonry Grid (Photos + Video Posters) */}
         <div className="columns-2 sm:columns-3 md:columns-4 gap-4">
-          {photos.map((photo, idx) => {
+          {displayPhotos.map((photo, idx) => {
             const isFav = selectedIds.has(photo.id);
             const isVideo = photo.type === "video";
 
@@ -1087,7 +1441,15 @@ export default function PublicAlbumView() {
               <div
                 key={photo.id}
                 className="break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800/90 hover:border-neutral-700 transition cursor-pointer"
-                onClick={() => setSelectedIndex(idx)}
+                onClick={() => {
+                  // Tag mode: tapping a photo opens the tag picker instead
+                  // of the lightbox (claimed visitors only — spec §3).
+                  if (tagMode && hasAnyClaim) {
+                    setTagPickerPhoto(photo);
+                  } else {
+                    setSelectedIndex(idx);
+                  }
+                }}
               >
                 <img
                   src={photo.urls.thumb}
@@ -1133,6 +1495,31 @@ export default function PublicAlbumView() {
                     <Download size={16} />
                   </button>
                 </div>
+
+                {/* Phase 1: tag button (claimed visitors only) */}
+                {hasAnyClaim && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTagPickerPhoto(photo);
+                    }}
+                    className={`absolute bottom-2 right-2 z-10 inline-flex items-center gap-1 px-2.5 py-2 rounded-full backdrop-blur-md transition cursor-pointer ${
+                      tagMode
+                        ? "bg-emerald-600 text-white shadow-lg shadow-emerald-950/50 opacity-100"
+                        : "bg-black/60 text-white/80 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
+                    }`}
+                    title="Tag a player in this photo"
+                    aria-label="Tag a player in this photo"
+                  >
+                    <Tag size={13} />
+                    {(tagsByPhoto.get(photo.id) || []).length > 0 && (
+                      <span className="text-[10px] font-mono font-bold">
+                        {(tagsByPhoto.get(photo.id) || []).length}
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1192,7 +1579,7 @@ export default function PublicAlbumView() {
               {/* Top Controls */}
               <div className="absolute top-4 right-4 flex items-center gap-2.5 z-50">
                 <span className="text-xs font-mono font-medium text-neutral-400 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/10">
-                  {selectedIndex + 1} / {photos.length}
+                  {selectedIndex + 1} / {displayPhotos.length}
                 </span>
 
                 <button
@@ -1257,6 +1644,38 @@ export default function PublicAlbumView() {
                   <X size={18} />
                 </button>
               </div>
+
+              {/* Phase 1: this photo's player tags (chips) + tag control.
+                  Chips show players, never who tagged them (spec §5). */}
+              {((tagsByPhoto.get(selectedPhoto.id) || []).length > 0 || hasAnyClaim) && (
+                <div
+                  className="absolute bottom-4 left-4 z-50 flex flex-wrap items-center gap-1.5 max-w-[75vw]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(tagsByPhoto.get(selectedPhoto.id) || []).map((t) => (
+                    <span
+                      key={t.playerKey}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-blue-950/80 border border-blue-800/70 text-blue-100 text-[11px] font-semibold backdrop-blur-md"
+                    >
+                      <Tag size={10} />
+                      {playerKeyLabel(t.playerKey, siteConfig.rosters)}
+                    </span>
+                  ))}
+                  {hasAnyClaim && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setTagPickerPhoto(selectedPhoto);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[32px] rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-white text-[11px] font-semibold backdrop-blur-md transition cursor-pointer"
+                    >
+                      <Tag size={10} />
+                      Tag player
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Desktop Next / Prev Chevrons */}
               {photos.length > 1 && (
@@ -1578,6 +1997,11 @@ export default function PublicAlbumView() {
             <button
               type="button"
               onClick={() => {
+                try {
+                  recordAlbumActivity(albumId, getOrCreateVisitorProfile().id, {
+                    downloads: 1,
+                  }).catch(() => {});
+                } catch {}
                 window.open(iosGuide.url, "_blank", "noopener");
                 setIosGuide(null);
               }}
@@ -1648,6 +2072,39 @@ export default function PublicAlbumView() {
           </div>
         </div>
       )}
+
+      {/* Phase 1: claim flow + tag picker */}
+      {visitorProfile && category && (
+        <ClaimModal
+          open={claimModalOpen}
+          onClose={() => setClaimModalOpen(false)}
+          category={category}
+          roster={rosterForCategory(siteConfig.rosters, category)}
+          profile={visitorProfile}
+          onSaved={(p) => {
+            setVisitorProfile(p);
+            // Immediate reward (spec §1): a fresh claim for this album
+            // switches straight into the My Player view.
+            if (
+              (p.claims || []).some(
+                (c) => c.category.trim().toLowerCase() === category.trim().toLowerCase()
+              )
+            ) {
+              setViewMode("my");
+              setSelectedIndex(null);
+            }
+          }}
+        />
+      )}
+
+      <TagPicker
+        photo={tagPickerPhoto}
+        options={tagOptions}
+        photoTags={tagPickerPhoto ? tagsByPhoto.get(tagPickerPhoto.id) || [] : []}
+        visitorId={visitorProfile?.id || ""}
+        onToggle={handleTagToggle}
+        onClose={() => setTagPickerPhoto(null)}
+      />
 
       <ShareSheet
         isOpen={isShareOpen}

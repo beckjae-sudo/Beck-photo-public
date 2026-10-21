@@ -108,6 +108,7 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     tagsCreated: number;
     unknown: string[];
     cancelled: boolean;
+    firstError: string;
   } | null>(null);
   const [clearBusy, setClearBusy] = useState(false);
   const cancelAutoRef = useRef(false);
@@ -251,6 +252,7 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     let failed = 0;
     let tagsCreated = 0;
     let unknownCount = 0;
+    let firstError = "";
     const unknownSet = new Set<string>();
     let notConfigured = false;
 
@@ -269,9 +271,12 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
           for (const n of res.unknownNumbers) unknownSet.add(n);
         } else {
           failed += 1;
+          if (!firstError && res.error) firstError = res.error;
         }
       } catch {
         failed += 1;
+        if (!firstError)
+          firstError = "The auto-tag request itself failed before the server answered.";
       }
       setAutoProgress({ done: processed + failed, total: candidates.length });
     }
@@ -293,6 +298,7 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
         tagsCreated,
         unknown: [...unknownSet],
         cancelled: cancelAutoRef.current,
+        firstError,
       });
     }
     setAutoRunning(false);
@@ -410,6 +416,12 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
                 {autoResult.tagsCreated} tags
                 {autoResult.unknown.length > 0 &&
                   ` · numbers not on the roster: ${autoResult.unknown.join(", ")}`}
+              </p>
+            )}
+
+            {autoResult?.firstError && (
+              <p className="text-[11px] text-red-400 font-mono leading-relaxed">
+                First error: {autoResult.firstError}
               </p>
             )}
 

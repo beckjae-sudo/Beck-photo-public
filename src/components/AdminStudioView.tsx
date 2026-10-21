@@ -828,6 +828,7 @@ export default function AdminStudioView() {
       let aFailed = 0;
       let aTags = 0;
       let aUnknown = 0;
+      let aFirstError = "";
 
       for (let pi = 0; pi < manifestPhotos.length; pi++) {
         if (sweepCancelRef.current) break;
@@ -855,13 +856,23 @@ export default function AdminStudioView() {
             for (const n of r.unknownNumbers) unknownSet.add(n);
           } else {
             aFailed += 1;
+            if (!aFirstError && r.error) aFirstError = r.error;
           }
         } catch {
           aFailed += 1;
+          if (!aFirstError)
+            aFirstError = "The auto-tag request itself failed before the server answered.";
         }
         setSweep((prev) =>
           prev ? { ...prev, photoDone: pi + 1 } : prev
         );
+      }
+
+      if (aFailed > 0 && aFirstError) {
+        failures.push(
+          `${album.title || album.id}: ${aFailed} photo(s) failed — first error: ${aFirstError}`
+        );
+        setSweep((prev) => (prev ? { ...prev, failures: [...failures] } : prev));
       }
 
       totals.albumsProcessed += 1;

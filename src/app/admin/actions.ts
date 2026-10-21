@@ -397,11 +397,16 @@ async function validateAlbumCategory(
   return { ok: true, category: match };
 }
 
+function normalizeTeamLook(value?: string): string {
+  return String(value || "").trim().slice(0, 200);
+}
+
 export async function createAlbum(albumData: {
   album_id: string;
   title: string;
   date: string;
   category?: string;
+  teamLook?: string;
   photos: any[];
   cover_url: string;
 }): Promise<{ success: boolean; error?: string }> {
@@ -412,6 +417,7 @@ export async function createAlbum(albumData: {
     const categoryCheck = await validateAlbumCategory(albumData.category);
     if (!categoryCheck.ok) return { success: false, error: categoryCheck.error };
     const category = categoryCheck.category;
+    const teamLook = normalizeTeamLook(albumData.teamLook);
 
     const r2 = getR2WriteClient();
 
@@ -420,7 +426,7 @@ export async function createAlbum(albumData: {
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: `${albumData.album_id}/manifest.json`,
-        Body: JSON.stringify({ ...albumData, category }, null, 2),
+        Body: JSON.stringify({ ...albumData, category, teamLook }, null, 2),
         ContentType: "application/json",
       })
     );
@@ -442,6 +448,7 @@ export async function createAlbum(albumData: {
       title: albumData.title,
       date: albumData.date,
       category,
+      teamLook,
       photo_count: albumData.photos.length,
       cover_url: albumData.cover_url,
     };
@@ -468,6 +475,7 @@ export async function updateExistingAlbum(albumData: {
   title: string;
   date: string;
   category?: string;
+  teamLook?: string;
   photos: any[];
   cover_url: string;
 }): Promise<{ success: boolean; error?: string }> {
@@ -478,6 +486,7 @@ export async function updateExistingAlbum(albumData: {
     const categoryCheck = await validateAlbumCategory(albumData.category);
     if (!categoryCheck.ok) return { success: false, error: categoryCheck.error };
     const category = categoryCheck.category;
+    const teamLook = normalizeTeamLook(albumData.teamLook);
 
     const r2 = getR2WriteClient();
 
@@ -485,7 +494,7 @@ export async function updateExistingAlbum(albumData: {
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: `${albumData.album_id}/manifest.json`,
-        Body: JSON.stringify({ ...albumData, category }, null, 2),
+        Body: JSON.stringify({ ...albumData, category, teamLook }, null, 2),
         ContentType: "application/json",
       })
     );
@@ -508,6 +517,7 @@ export async function updateExistingAlbum(albumData: {
           title: albumData.title,
           date: albumData.date,
           category,
+          teamLook,
           photo_count: albumData.photos.length,
           cover_url: albumData.cover_url,
         };
@@ -725,12 +735,38 @@ export async function importAlbumsFromFamily(
 // caller's own record, and the full list is read here, behind checkAdminAuth.
 // ---------------------------------------------------------------------------
 
+async function readAlbumManifest(albumId: string): Promise<any | null> {
+  const bucket = process.env.R2_BUCKET_NAME?.trim();
+  if (!bucket) return null;
+  const r2 = getR2WriteClient();
+  const obj = await r2.send(
+    new GetObjectCommand({ Bucket: bucket, Key: `${albumId}/manifest.json` })
+  );
+  const str = await obj.Body?.transformToString();
+  if (!str) return null;
+  const manifest = JSON.parse(str);
+  return manifest && typeof manifest === "object" && !Array.isArray(manifest)
+    ? manifest
+    : null;
+}
+
+async function readAlbumManifestTeamLook(albumId: string): Promise<string> {
+  try {
+    const manifest = await readAlbumManifest(albumId);
+    return normalizeTeamLook(manifest?.teamLook);
+  } catch {
+    // A missing/unreadable manifest must not block auto-tagging; the
+    // category-level description remains the fallback.
+    return "";
+  }
+}
+
 export interface AdminAudienceTag {
   photoId: string;
   playerKey: string;
   taggedByVisitorId: string;
   createdAt: number;
-  source?: "manual" | "auto";
+  source?: "manual" | "auto" | "burst";
 }
 
 async function readAlbumJsonFile<T>(r2: S3Client, bucket: string, key: string): Promise<T[]> {
@@ -1072,7 +1108,11 @@ export async function autoTagPhoto(
     const config = await getPublicSiteConfig();
     const roster = rosterForCategory(config.rosters, cat).filter((p) => p.active);
     const rosterNumbers = roster.map((p) => p.number);
-    const teamDescription = teamDescriptionFor(config.team_descriptions, cat);
+    // A game's kit can differ from the team's usual look (home vs away), so
+    // an album-level description wins; the category description is fallback.
+    const albumTeamLook = await readAlbumManifestTeamLook(id);
+    const teamDescription =
+      albumTeamLook || teamDescriptionFor(config.team_descriptions, cat);
 
     // Fetch the display-size (1920px) version only — never the original.
     const imgRes = await fetch(url, { cache: "no-store" });
@@ -1214,5 +1254,174 @@ export async function clearAutoTags(
     return { success: true, removed, tags: kept as AdminAudienceTag[] };
   } catch (err: any) {
     return { success: false, removed: 0, tags: [], error: err?.message || String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Burst fill (admin only): free, sequence-based tag propagation.
+//
+// This uses only the album's stored manifest order, photo timestamps, and
+// existing tags — no Gemini call or other external service. It is additive
+// only: existing tags are never changed or removed, and duplicate
+// (photo, player) pairs are never created.
+// ---------------------------------------------------------------------------
+
+const BURST_MAX_SANDWICH_RUN = 10;
+const BURST_MAX_NEIGHBOR_GAP_MS = 3_000;
+const BURST_MAX_CLUSTER_SPAN_MS = 30_000;
+
+export interface BurstFillResult {
+  success: boolean;
+  tagsAdded: number;
+  photosFilled: number;
+  playersInvolved: number;
+  error?: string;
+}
+
+function burstTimestampMs(photo: any): number | null {
+  const raw = photo?.metadata?.lastModified;
+  const value =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim()
+        ? Number(raw)
+        : NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export async function burstFillAlbum(albumId: string): Promise<BurstFillResult> {
+  const empty = { tagsAdded: 0, photosFilled: 0, playersInvolved: 0 };
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, ...empty, error: "Unauthorized" };
+
+    const id = String(albumId || "").trim();
+    if (!id) return { success: false, ...empty, error: "Missing album id." };
+
+    const manifest = await readAlbumManifest(id);
+    if (!manifest || !Array.isArray(manifest.photos)) {
+      return { success: false, ...empty, error: "Album manifest not found." };
+    }
+
+    const orderedPhotos: any[] = [];
+    const seenPhotoIds = new Set<string>();
+    for (const photo of manifest.photos) {
+      const photoId = String(photo?.id || "").trim();
+      if (!photoId || seenPhotoIds.has(photoId)) continue;
+      seenPhotoIds.add(photoId);
+      orderedPhotos.push(photo);
+    }
+    const photoIds = orderedPhotos.map((photo) => String(photo.id).trim());
+    if (photoIds.length === 0) return { success: true, ...empty };
+
+    const data = await readTagsFile(id);
+    const initialTagsByPhoto = new Map<string, typeof data.tags>();
+    for (const tag of data.tags) {
+      if (!seenPhotoIds.has(tag.photoId)) continue;
+      const arr = initialTagsByPhoto.get(tag.photoId) || [];
+      arr.push(tag);
+      initialTagsByPhoto.set(tag.photoId, arr);
+    }
+
+    const tagKey = (photoId: string, playerKey: string) => `${photoId}\u0000${playerKey}`;
+    const existing = new Set(data.tags.map((t) => tagKey(t.photoId, t.playerKey)));
+    const queued = new Map<string, (typeof data.tags)[number]>();
+    const createdAt = Date.now();
+    const queueTag = (photoId: string, playerKey: string) => {
+      const key = tagKey(photoId, playerKey);
+      if (existing.has(key) || queued.has(key)) return;
+      queued.set(key, {
+        photoId,
+        playerKey,
+        taggedByVisitorId: "burst",
+        createdAt,
+        source: "burst",
+      });
+    };
+
+    // Sandwich fill: a maximal run of photos with no tags at all, bounded
+    // on both sides by the same player, inherits that player's tag. Runs
+    // longer than the cap are left alone entirely.
+    let index = 0;
+    while (index < photoIds.length) {
+      if ((initialTagsByPhoto.get(photoIds[index]) || []).length > 0) {
+        index += 1;
+        continue;
+      }
+      const runStart = index;
+      while (
+        index < photoIds.length &&
+        (initialTagsByPhoto.get(photoIds[index]) || []).length === 0
+      ) {
+        index += 1;
+      }
+      const runEnd = index; // exclusive
+      const runLength = runEnd - runStart;
+      if (runLength <= BURST_MAX_SANDWICH_RUN && runStart > 0 && runEnd < photoIds.length) {
+        const leftPlayers = new Set(
+          (initialTagsByPhoto.get(photoIds[runStart - 1]) || []).map((t) => t.playerKey)
+        );
+        const rightPlayers = new Set(
+          (initialTagsByPhoto.get(photoIds[runEnd]) || []).map((t) => t.playerKey)
+        );
+        for (const playerKey of leftPlayers) {
+          if (!rightPlayers.has(playerKey)) continue;
+          for (let i = runStart; i < runEnd; i += 1) queueTag(photoIds[i], playerKey);
+        }
+      }
+    }
+
+    // Burst clusters are used only when the whole manifest has usable,
+    // strictly increasing timestamps. Any missing, equal, or backwards
+    // timestamp disables clustering (sandwich fill above still applies).
+    const timestamps = orderedPhotos.map(burstTimestampMs);
+    const timestampsUsable =
+      timestamps.length > 1 &&
+      timestamps.every((value) => value !== null) &&
+      timestamps.every((value, i) => i === 0 || value! > timestamps[i - 1]!);
+    if (timestampsUsable) {
+      const times = timestamps as number[];
+      let clusterStart = 0;
+      while (clusterStart < photoIds.length) {
+        let clusterEnd = clusterStart;
+        while (
+          clusterEnd + 1 < photoIds.length &&
+          times[clusterEnd + 1] - times[clusterEnd] <= BURST_MAX_NEIGHBOR_GAP_MS &&
+          times[clusterEnd + 1] - times[clusterStart] <= BURST_MAX_CLUSTER_SPAN_MS
+        ) {
+          clusterEnd += 1;
+        }
+        if (clusterEnd > clusterStart) {
+          const clusterPlayers = new Set<string>();
+          for (let i = clusterStart; i <= clusterEnd; i += 1) {
+            for (const tag of initialTagsByPhoto.get(photoIds[i]) || []) {
+              clusterPlayers.add(tag.playerKey);
+            }
+          }
+          for (let i = clusterStart; i <= clusterEnd; i += 1) {
+            for (const playerKey of clusterPlayers) queueTag(photoIds[i], playerKey);
+          }
+        }
+        clusterStart = clusterEnd + 1;
+      }
+    }
+
+    const additions = [...queued.values()];
+    if (additions.length === 0) return { success: true, ...empty };
+
+    // One write for the whole fill. Only data.tags changes; the auto-tag
+    // processed markers and last-run summary are deliberately untouched.
+    data.tags.push(...additions);
+    const ok = await writeTagsFile(id, data);
+    if (!ok) return { success: false, ...empty, error: "Could not save the burst-fill tags." };
+
+    return {
+      success: true,
+      tagsAdded: additions.length,
+      photosFilled: new Set(additions.map((t) => t.photoId)).size,
+      playersInvolved: new Set(additions.map((t) => t.playerKey)).size,
+    };
+  } catch (err: any) {
+    return { success: false, ...empty, error: err?.message || String(err) };
   }
 }

@@ -279,10 +279,12 @@ export default function PublicAlbumView() {
     [photos, tagsByPhoto, activeFilterKeys]
   );
   // The grid/lightbox work off displayPhotos. In My Player view that's the
-  // tagged subset — except in tag mode with an empty subset, where we browse
-  // the full album to build the view (spec §3 cold start).
-  const displayPhotos =
-    viewMode === "my" && !(tagMode && myPlayerPhotos.length === 0)
+  // tagged subset. Tag mode is the exception: it always works from the full
+  // album so tagging the first photo cannot collapse the grid to the tagged
+  // subset. Done (finishTagMode) is what switches to the player's set.
+  const displayPhotos = tagMode
+    ? photos
+    : viewMode === "my"
       ? myPlayerPhotos
       : photos;
   const allDisplaySelected =
@@ -727,17 +729,17 @@ export default function PublicAlbumView() {
   };
 
   // Phase 1/2 tag toggle for ANY photo: add when absent; remove when the
-  // existing tag is the visitor's own manual tag or an AUTO tag (auto tags
-  // are provisional — any claimed visitor can correct one). Someone else's
-  // manual tag is left alone. The server returns the album's full updated
-  // tag list, which becomes the new local state.
+  // existing tag is the visitor's own manual tag or a machine tag (AUTO and
+  // BURST tags are provisional — any claimed visitor can correct one).
+  // Someone else's manual tag is left alone. The server returns the album's
+  // full updated tag list, which becomes the new local state.
   const toggleTagForPhoto = async (photo: Photo, playerKey: string) => {
     if (!visitorProfile) return;
     const existing = (tagsByPhoto.get(photo.id) || []).find(
       (t) => t.playerKey === playerKey
     );
     if (existing) {
-      if (existing.source === "auto") {
+      if (existing.source === "auto" || existing.source === "burst") {
         const res = await removeAutoTag(albumId, {
           photoId: photo.id,
           playerKey,
@@ -781,6 +783,18 @@ export default function PublicAlbumView() {
   const exitTagMode = () => {
     setTagMode(false);
     setPlayerPickOpen(false);
+  };
+  // Done is the deliberate end of a tagging pass: leave tag mode and only
+  // then present the sticky player's tagged photos in My Player view.
+  const finishTagMode = () => {
+    const playerKey = stickyTagKey;
+    setTagMode(false);
+    setPlayerPickOpen(false);
+    if (playerKey) {
+      setSubFilterKey(playerKey);
+      setViewMode("my");
+      setSelectedIndex(null);
+    }
   };
   const handlePlayerPick = (playerKey: string) => {
     setStickyTagKey(playerKey);
@@ -1455,8 +1469,8 @@ export default function PublicAlbumView() {
           <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-blue-950/40 border border-blue-800/50 text-blue-200 text-xs">
             <Check size={14} className="shrink-0 text-blue-400" strokeWidth={3} />
             <span>
-              Tap the <span className="font-semibold">checkmark</span> on any photo to select it for
-              download.
+              Tap the <span className="font-semibold">circle</span> on any photo to select it for
+              download — selected photos show a checkmark.
             </span>
             <button
               type="button"
@@ -1536,7 +1550,7 @@ export default function PublicAlbumView() {
             </button>
             <button
               type="button"
-              onClick={exitTagMode}
+              onClick={finishTagMode}
               className="px-2.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition cursor-pointer shrink-0"
             >
               Done
@@ -1549,11 +1563,21 @@ export default function PublicAlbumView() {
           {displayPhotos.map((photo, idx) => {
             const isFav = selectedIds.has(photo.id);
             const isVideo = photo.type === "video";
+            const isStickyTagged =
+              tagMode &&
+              !!stickyTagKey &&
+              (tagsByPhoto.get(photo.id) || []).some(
+                (t) => t.playerKey === stickyTagKey
+              );
 
             return (
               <div
                 key={photo.id}
-                className="break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800/90 hover:border-neutral-700 transition cursor-pointer"
+                className={`break-inside-avoid mb-4 group relative rounded-xl overflow-hidden bg-neutral-900 border transition cursor-pointer ${
+                  isStickyTagged
+                    ? "border-emerald-500 ring-2 ring-emerald-500/50"
+                    : "border-neutral-800/90 hover:border-neutral-700"
+                }`}
                 onClick={() => {
                   // Tag mode: tapping a photo applies the sticky player
                   // instantly — no picker (claimed visitors only).
@@ -1573,6 +1597,13 @@ export default function PublicAlbumView() {
                   loading="lazy"
                   style={photo.aspect_ratio ? { aspectRatio: `${photo.aspect_ratio}` } : undefined}
                 />
+
+                {isStickyTagged && (
+                  <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold shadow-lg shadow-emerald-950/40 pointer-events-none">
+                    <Check size={11} strokeWidth={3} />
+                    Tagged
+                  </div>
+                )}
 
                 {/* Video Play Badge & Duration Indicator */}
                 {isVideo && (
@@ -1772,9 +1803,10 @@ export default function PublicAlbumView() {
 
               {/* Phase 1/2: this photo's player tags (chips) + tag controls.
                   Chips show players, never who tagged them (spec §5). AUTO
-                  chips carry an "auto" marker and, for claimed visitors, an
-                  × to remove a wrong machine tag ("Not #12"). In tag mode
-                  a one-tap sticky Tag/Untag button acts on this photo. */}
+                  and BURST chips carry a source marker and, for claimed
+                  visitors, an × to remove a wrong machine tag ("Not #12").
+                  In tag mode a one-tap sticky Tag/Untag button acts on this
+                  photo. */}
               {((tagsByPhoto.get(selectedPhoto.id) || []).length > 0 ||
                 hasAnyClaim ||
                 (tagMode && stickyTagKey)) && (
@@ -1784,21 +1816,30 @@ export default function PublicAlbumView() {
                 >
                   {(tagsByPhoto.get(selectedPhoto.id) || []).map((t) => {
                     const isAuto = t.source === "auto";
-                    const removable = isAuto && hasAnyClaim;
+                    const isBurst = t.source === "burst";
+                    const isMachine = isAuto || isBurst;
+                    const removable = isMachine && hasAnyClaim;
+                    const sourceLabel = isAuto ? "auto" : isBurst ? "burst" : "";
                     return (
                       <span
                         key={t.playerKey}
                         className={`inline-flex items-center gap-1 pl-2.5 ${removable ? "pr-1.5" : "pr-2.5"} py-1.5 rounded-full border text-[11px] font-semibold backdrop-blur-md ${
                           isAuto
                             ? "bg-amber-950/80 border-amber-800/70 text-amber-100"
-                            : "bg-blue-950/80 border-blue-800/70 text-blue-100"
+                            : isBurst
+                              ? "bg-emerald-950/80 border-emerald-800/70 text-emerald-100"
+                              : "bg-blue-950/80 border-blue-800/70 text-blue-100"
                         }`}
                       >
                         <Tag size={10} />
                         {playerKeyLabel(t.playerKey, siteConfig.rosters)}
-                        {isAuto && (
-                          <span className="text-[9px] font-mono uppercase text-amber-300/80">
-                            auto
+                        {sourceLabel && (
+                          <span
+                            className={`text-[9px] font-mono uppercase ${
+                              isAuto ? "text-amber-300/80" : "text-emerald-300/80"
+                            }`}
+                          >
+                            {sourceLabel}
                           </span>
                         )}
                         {removable && (
@@ -1808,9 +1849,13 @@ export default function PublicAlbumView() {
                               e.stopPropagation();
                               void toggleTagForPhoto(selectedPhoto, t.playerKey);
                             }}
-                            className="p-0.5 rounded-full text-amber-200/70 hover:text-white hover:bg-amber-800/60 transition cursor-pointer"
-                            title={`Not ${playerKeyLabel(t.playerKey, siteConfig.rosters)}? Remove this auto tag`}
-                            aria-label={`Remove auto tag ${playerKeyLabel(t.playerKey, siteConfig.rosters)}`}
+                            className={`p-0.5 rounded-full transition cursor-pointer ${
+                              isAuto
+                                ? "text-amber-200/70 hover:text-white hover:bg-amber-800/60"
+                                : "text-emerald-200/70 hover:text-white hover:bg-emerald-800/60"
+                            }`}
+                            title={`Not ${playerKeyLabel(t.playerKey, siteConfig.rosters)}? Remove this ${sourceLabel} tag`}
+                            aria-label={`Remove ${sourceLabel} tag ${playerKeyLabel(t.playerKey, siteConfig.rosters)}`}
                           >
                             <X size={11} />
                           </button>

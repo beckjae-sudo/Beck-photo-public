@@ -20,8 +20,9 @@ interface TagPickerProps {
  * Phase 1 tag picker (spec §3): one tap per player. Tags the visitor made
  * can be removed by them; tags made by others show as tagged but locked
  * (only the tagger or the admin can remove them). AUTO tags (Phase 2,
- * from jersey-number reading) are the exception: they're provisional, so
- * any claimed visitor can remove one that's wrong.
+ * from jersey-number reading) and BURST tags (from sequence filling) are
+ * the exception: they're provisional, so any claimed visitor can remove
+ * one that's wrong.
  */
 export default function TagPicker({
   photo,
@@ -43,7 +44,8 @@ export default function TagPicker({
     if (
       existing &&
       existing.taggedByVisitorId !== visitorId &&
-      existing.source !== "auto"
+      existing.source !== "auto" &&
+      existing.source !== "burst"
     )
       return; // someone else's manual tag — locked
     setBusyKey(opt.key);
@@ -94,7 +96,9 @@ export default function TagPicker({
             const existing = tagFor(opt.key);
             const mine = existing?.taggedByVisitorId === visitorId;
             const isAuto = existing?.source === "auto";
-            const locked = Boolean(existing) && !mine && !isAuto;
+            const isBurst = existing?.source === "burst";
+            const isMachine = isAuto || isBurst;
+            const locked = Boolean(existing) && !mine && !isMachine;
             const busy = busyKey === opt.key;
             return (
               <button
@@ -104,7 +108,7 @@ export default function TagPicker({
                 onClick={() => handleClick(opt)}
                 className={`w-full flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[44px] rounded-xl border text-xs font-semibold transition ${
                   existing
-                    ? mine || isAuto
+                    ? mine || isMachine
                       ? "bg-blue-950/70 border-blue-700/70 text-blue-100 cursor-pointer"
                       : "bg-neutral-900 border-neutral-800 text-neutral-400 cursor-not-allowed"
                     : "bg-neutral-900 border-neutral-800 text-neutral-200 hover:border-neutral-600 hover:text-white cursor-pointer"
@@ -122,14 +126,27 @@ export default function TagPicker({
                       Auto
                     </span>
                   )}
+                  {isBurst && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-900/80 text-emerald-200 border border-emerald-800 shrink-0">
+                      Burst
+                    </span>
+                  )}
                 </span>
                 <span className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
                   {busy ? (
                     <Loader2 size={13} className="animate-spin" />
                   ) : existing ? (
                     <>
-                      <Check size={13} className={mine || isAuto ? "text-blue-300" : "text-neutral-500"} />
-                      <span>{mine ? "Tagged by you" : isAuto ? "Auto tag" : "Tagged"}</span>
+                      <Check size={13} className={mine || isMachine ? "text-blue-300" : "text-neutral-500"} />
+                      <span>
+                        {mine
+                          ? "Tagged by you"
+                          : isAuto
+                            ? "Auto tag"
+                            : isBurst
+                              ? "Burst tag"
+                              : "Tagged"}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -146,7 +163,9 @@ export default function TagPicker({
         <p className="text-[11px] text-neutral-500 leading-relaxed">
           Tap a player to tag them; tap a tag you made to remove it.{" "}
           <span className="text-amber-300/80">Auto</span> tags come from
-          jersey-number reading — anyone can remove one that&apos;s wrong.
+          jersey-number reading and <span className="text-emerald-300/80">Burst</span>{" "}
+          tags from filling gaps across a burst — anyone can remove either
+          if it&apos;s wrong.
         </p>
       </div>
     </div>

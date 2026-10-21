@@ -3,6 +3,9 @@ export interface AlbumSummary {
   title: string;
   date: string;
   category?: string;
+  /** Optional per-album kit description for auto-tagging; overrides the
+   *  category-level Team look when this game used the other kit. */
+  teamLook?: string;
   sub_category?: string;
   photo_count: number;
   cover_url: string;

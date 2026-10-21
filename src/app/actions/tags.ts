@@ -9,11 +9,11 @@ import {
 } from "@/lib/tagsStore";
 
 /**
- * Phase 1 player tags (spec §3). Human-made tags plus, since Phase 2,
- * machine-made "auto" tags from jersey-number reading — never face
- * recognition. Stored at `{albumId}/tags.json` (see lib/tagsStore.ts),
- * deliberately NOT inside manifest.json so tagging never rewrites
- * album data.
+ * Phase 1 player tags (spec §3). Human-made tags plus machine-made tags:
+ * "auto" from jersey-number reading and "burst" from sequence filling —
+ * never face recognition. Stored at `{albumId}/tags.json` (see
+ * lib/tagsStore.ts), deliberately NOT inside manifest.json so tagging
+ * never rewrites album data.
  */
 export type { TagRecord };
 
@@ -117,9 +117,10 @@ export async function removeAlbumTag(
   return { success: ok, tags: next };
 }
 
-/** Any claimed visitor may remove an AUTO tag (Phase 2): machine tags are
- *  provisional until a person confirms them, so correcting one is open to
- *  every claimed viewer — the "Not #12" fix. Manual tags never match here. */
+/** Any claimed visitor may remove an AUTO or BURST tag: machine-made tags
+ *  are provisional until a person confirms them, so correcting one is open
+ *  to every claimed viewer — the "Not #12" fix. Manual tags never match
+ *  here. (The function name predates burst tags and is kept for callers.) */
 export async function removeAutoTag(
   albumId: string,
   tag: { photoId: string; playerKey: string; visitorId: string }
@@ -136,7 +137,7 @@ export async function removeAutoTag(
       !(
         t.photoId === photoId &&
         t.playerKey === playerKey &&
-        tagSource(t) === "auto"
+        (tagSource(t) === "auto" || tagSource(t) === "burst")
       )
   );
   if (next.length === data.tags.length) return { success: true, tags: data.tags };

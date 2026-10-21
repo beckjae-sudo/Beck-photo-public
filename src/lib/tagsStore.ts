@@ -18,11 +18,12 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3
 export interface TagRecord {
   photoId: string;
   playerKey: string;
-  /** Visitor id for human tags; the literal "auto" for machine tags. */
+  /** Visitor id for human tags; the literal "auto" for Gemini tags or
+   *  "burst" for sequence-fill tags. */
   taggedByVisitorId: string;
   createdAt: number;
   /** Absent on Phase 1 records — those are manual. */
-  source?: "manual" | "auto";
+  source?: "manual" | "auto" | "burst";
 }
 
 export interface AutoTagRunSummary {
@@ -46,8 +47,8 @@ export interface TagsFileData {
   lastAutoTagRun: AutoTagRunSummary | null;
 }
 
-export function tagSource(t: TagRecord): "manual" | "auto" {
-  return t.source === "auto" ? "auto" : "manual";
+export function tagSource(t: TagRecord): "manual" | "auto" | "burst" {
+  return t.source === "auto" || t.source === "burst" ? t.source : "manual";
 }
 
 export function emptyTagsFile(): TagsFileData {

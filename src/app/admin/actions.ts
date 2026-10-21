@@ -838,7 +838,15 @@ export async function adminRemoveAlbumTag(
 // explains how to enable the feature.
 // ---------------------------------------------------------------------------
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+/** Gemini model for number reading. Google retires models for new
+ *  accounts without notice (gemini-2.5-flash 404'd for Jae's new key on
+ *  2026-10-21: "no longer available to new users"), so the model is
+ *  overridable via the GEMINI_MODEL env var (either casing) and the
+ *  default tracks the model Google's own error message prescribed. */
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL?.trim() ||
+  process.env.gemini_model?.trim() ||
+  "gemini-3.8-flash";
 
 /** The Gemini API key. Env var names are case-sensitive on Vercel/Linux,
  *  so accept the lowercase spelling too — the variable was created as

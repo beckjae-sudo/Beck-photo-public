@@ -153,7 +153,7 @@ export default function ClaimModal({
             <div>
               <h3 className="text-sm font-bold text-white">Who are you here for?</h3>
               <p className="text-xs text-neutral-400">
-                {category} — pick a player, see only their photos.
+                {category} — pick your player or players, see only their photos.
               </p>
             </div>
           </div>

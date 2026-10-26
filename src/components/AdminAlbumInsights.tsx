@@ -13,12 +13,13 @@ import {
   Layers,
 } from "lucide-react";
 import {
+  adminAddAlbumTag,
   adminRemoveAlbumTag,
   burstFillAlbum,
   clearAutoTags,
   getAlbumAudience,
 } from "@/app/admin/actions";
-import { playerKeyLabel, rosterForCategory } from "@/lib/players";
+import { playerKeyFor, playerKeyLabel, rosterForCategory } from "@/lib/players";
 import { DEFAULT_PUBLIC_CONFIG, PublicSiteConfig } from "@/lib/types";
 
 interface AdminAlbumInsightsProps {
@@ -86,6 +87,10 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
   const [removingKey, setRemovingKey] = useState<string | null>(null);
 
   const [clearBusy, setClearBusy] = useState(false);
+  const [sweepOpen, setSweepOpen] = useState(false);
+  const [sweepPlayerKey, setSweepPlayerKey] = useState<string | null>(null);
+  const [sweepBusyPhotoId, setSweepBusyPhotoId] = useState<string | null>(null);
+  const [sweepError, setSweepError] = useState("");
   const [burstBusy, setBurstBusy] = useState(false);
   const [burstResult, setBurstResult] = useState<{
     tagsAdded: number;
@@ -208,6 +213,70 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
     () => tags.filter((t) => t.source === "burst").length,
     [tags]
   );
+  /** Tag Sweep options: the category roster (active players), plus any
+   *  player key already tagged on this album so an off-roster player can
+   *  keep being swept. */
+  const sweepOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of rosterForCategory(rosters, category)) {
+      if (!p.active) continue;
+      const key = playerKeyFor(category, p.number);
+      m.set(key, playerKeyLabel(key, rosters));
+    }
+    for (const t of tags) {
+      if (!m.has(t.playerKey)) m.set(t.playerKey, playerKeyLabel(t.playerKey, rosters));
+    }
+    return [...m.entries()].map(([key, label]) => ({ key, label }));
+  }, [rosters, category, tags]);
+
+  const sweepPhotos = useMemo(
+    () => photos.filter((p) => p.urls?.thumb),
+    [photos]
+  );
+
+  const sweepTaggedIds = useMemo(() => {
+    if (!sweepPlayerKey) return new Set<string>();
+    return new Set(
+      tags.filter((t) => t.playerKey === sweepPlayerKey).map((t) => t.photoId)
+    );
+  }, [tags, sweepPlayerKey]);
+
+  const handleSweepToggle = async (photoId: string) => {
+    if (!sweepPlayerKey || sweepBusyPhotoId) return;
+    const key = sweepPlayerKey;
+    const isTagged = sweepTaggedIds.has(photoId);
+    setSweepError("");
+    setSweepBusyPhotoId(photoId);
+    // Optimistic update; the server response (or a reload on failure)
+    // replaces it with the stored truth.
+    setTags((prev) =>
+      isTagged
+        ? prev.filter((t) => !(t.photoId === photoId && t.playerKey === key))
+        : [
+            ...prev,
+            {
+              photoId,
+              playerKey: key,
+              taggedByVisitorId: "admin",
+              createdAt: Date.now(),
+              source: "manual" as const,
+            },
+          ]
+    );
+    try {
+      const res = isTagged
+        ? await adminRemoveAlbumTag(albumId, photoId, key)
+        : await adminAddAlbumTag(albumId, photoId, key);
+      if (!res.success) throw new Error(res.error || "Could not save the tag.");
+      setTags(res.tags as AudienceTag[]);
+    } catch (e: any) {
+      setSweepError(e?.message || "Could not save the tag — reloaded the saved tags.");
+      await load();
+    } finally {
+      setSweepBusyPhotoId(null);
+    }
+  };
+
   const handleBurstFill = async () => {
     if (burstBusy) return;
     setBurstBusy(true);
@@ -371,6 +440,144 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
             </p>
           )}
         </div>
+
+        {/* Tag Sweep: the admin initial pass. Pick any roster player, then
+            tap photos to tag/untag them — no visitor claim involved. Tags
+            are manual tags attributed to "admin". */}
+        <div className="space-y-2 border-t border-neutral-800 pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
+              <Tag size={13} className="text-emerald-400" />
+              Tag photos — initial sweep
+            </h4>
+            <button
+              type="button"
+              onClick={() => setSweepOpen((v) => !v)}
+              className="inline-flex items-center px-3 py-1.5 min-h-[32px] rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[11px] font-semibold transition cursor-pointer"
+            >
+              {sweepOpen ? "Close sweep" : "Open sweep"}
+            </button>
+          </div>
+          <p className="text-[11px] text-neutral-500 leading-relaxed">
+            Your seeding pass: pick any player on this team&apos;s roster,
+            then tap photos to tag them — tap again to remove. Unlike the
+            public page, no claim is needed here; tags you add are manual
+            tags credited to Admin.
+          </p>
+
+          {sweepOpen && (
+            <div className="space-y-3 pt-1">
+              {sweepOptions.length === 0 ? (
+                <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                  No roster for this category yet — add one under Team
+                  Rosters first, then the sweep can pick from it.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sweepOptions.map((opt) => {
+                      const on = sweepPlayerKey === opt.key;
+                      const count = tags.filter(
+                        (t) => t.playerKey === opt.key
+                      ).length;
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setSweepPlayerKey(opt.key)}
+                          aria-pressed={on}
+                          className={`px-2.5 py-1.5 min-h-[34px] rounded-full text-[11px] font-semibold border transition cursor-pointer ${
+                            on
+                              ? "bg-emerald-600 border-emerald-500 text-white"
+                              : "bg-neutral-900 border-neutral-800 text-neutral-300 hover:border-neutral-600 hover:text-white"
+                          }`}
+                        >
+                          {opt.label}
+                          <span className={on ? "text-emerald-200/80" : "text-neutral-500"}>
+                            {" "}· {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {sweepPlayerKey ? (
+                    <>
+                      <p className="text-[11px] text-neutral-400">
+                        Tagging:{" "}
+                        <span className="font-semibold text-white">
+                          {playerKeyLabel(sweepPlayerKey, rosters)}
+                        </span>{" "}
+                        — {sweepTaggedIds.size} of {sweepPhotos.length} photos
+                        tagged. Tap a photo to tag it, tap again to remove the
+                        tag.
+                      </p>
+                      {sweepError && (
+                        <p className="text-[11px] text-red-400 font-mono leading-relaxed">
+                          {sweepError}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-1.5 max-h-[480px] overflow-y-auto pr-1">
+                        {sweepPhotos.map((photo) => {
+                          const isTagged = sweepTaggedIds.has(photo.id);
+                          const otherCount = (
+                            tagsByPhoto.get(photo.id) || []
+                          ).filter((t) => t.playerKey !== sweepPlayerKey).length;
+                          const busy = sweepBusyPhotoId === photo.id;
+                          return (
+                            <button
+                              key={photo.id}
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleSweepToggle(photo.id)}
+                              aria-pressed={isTagged}
+                              title={
+                                isTagged
+                                  ? `Remove ${playerKeyLabel(sweepPlayerKey, rosters)} tag`
+                                  : `Tag as ${playerKeyLabel(sweepPlayerKey, rosters)}`
+                              }
+                              className={`relative aspect-square rounded-lg overflow-hidden border-2 transition cursor-pointer disabled:opacity-60 ${
+                                isTagged
+                                  ? "border-emerald-500"
+                                  : "border-transparent hover:border-neutral-500"
+                              }`}
+                            >
+                              <img
+                                src={photo.urls?.thumb}
+                                alt={photo.original_filename}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                              {isTagged && (
+                                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-600 text-white">
+                                  Tagged
+                                </span>
+                              )}
+                              {otherCount > 0 && (
+                                <span className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-neutral-900/85 text-neutral-200 border border-neutral-700">
+                                  +{otherCount}
+                                </span>
+                              )}
+                              {busy && (
+                                <span className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                  <Loader2 size={16} className="animate-spin text-white" />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-neutral-500">
+                      Pick a player above to start tapping photos.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Per-player rollups */}
@@ -532,7 +739,9 @@ export default function AdminAlbumInsights({ albumId, category, photos }: AdminA
                                 ? "by Auto-tag"
                                 : isBurst
                                   ? "by Burst"
-                                  : `by ${tagger?.claim?.displayName || tagger?.name || "a visitor"}`}
+                                  : t.taggedByVisitorId === "admin"
+                                    ? "by Admin"
+                                    : `by ${tagger?.claim?.displayName || tagger?.name || "a visitor"}`}
                             </span>
                             <button
                               type="button"

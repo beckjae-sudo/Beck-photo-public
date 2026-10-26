@@ -16,7 +16,8 @@ interface TagPlayerPickerProps {
  * Tag mode's "pick once" player chooser (Phase 2 sticky tagging): the
  * visitor picks who they're tagging ONE time, then taps photos to apply
  * that player instantly — no per-photo "who is this?" prompt. Options are
- * the same list the tag picker uses: claimed players first, then roster.
+ * the visitor's claimed players for this category (2026-10-26: viewers tag
+ * only who they've claimed; tagging anyone is the admin Tag Sweep).
  */
 export default function TagPlayerPicker({
   open,
@@ -60,7 +61,9 @@ export default function TagPlayerPicker({
         <div className="space-y-2 overflow-y-auto pr-1">
           {options.length === 0 && (
             <p className="text-xs text-neutral-500 leading-relaxed">
-              No players to pick from yet for this team.
+              You tag the players you&apos;ve claimed — claim your player
+              first (My Player, above), then come back to tag them. Here for
+              more than one player? You can claim them all.
             </p>
           )}
           {options.map((opt) => {

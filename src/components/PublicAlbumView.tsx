@@ -289,8 +289,16 @@ export default function PublicAlbumView() {
       : photos;
   const allDisplaySelected =
     displayPhotos.length > 0 && displayPhotos.every((p) => selectedIds.has(p.id));
+  // Viewers tag only players they have claimed in this category (decided
+  // 2026-10-26): claim one player or several, tag those. Tagging ANY player
+  // is the admin's Tag Sweep on the album edit page, not a viewer power.
   const tagOptions = useMemo(
-    () => buildPlayerOptions(category, siteConfig.rosters, visitorProfile?.claims || []),
+    () =>
+      buildPlayerOptions(
+        category,
+        siteConfig.rosters,
+        visitorProfile?.claims || []
+      ).filter((o) => o.isClaimed),
     [category, siteConfig.rosters, visitorProfile]
   );
 
@@ -1424,6 +1432,14 @@ export default function PublicAlbumView() {
                   ))}
                 </div>
               )}
+              <button
+                type="button"
+                onClick={() => setClaimModalOpen(true)}
+                className="px-2.5 py-1.5 min-h-[32px] rounded-full text-[11px] font-semibold border border-dashed border-neutral-700 text-neutral-300 hover:text-white hover:border-neutral-500 transition cursor-pointer"
+                title="Claim another player on this team — you'll see and tag their photos too"
+              >
+                + Add a player
+              </button>
             </div>
           )}
         </div>
@@ -1436,7 +1452,8 @@ export default function PublicAlbumView() {
             <p className="text-xs flex-1 min-w-[200px] leading-relaxed">
               Here for a player?{" "}
               <span className="text-blue-200/75">
-                Pick your player and see only their photos — and download just those.
+                Pick your player — or players, if you&apos;re here for more
+                than one — and see only their photos, and download just those.
               </span>
             </p>
             <button
@@ -1444,7 +1461,7 @@ export default function PublicAlbumView() {
               onClick={() => setClaimModalOpen(true)}
               className="px-4 py-2 min-h-[40px] rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-950/40 transition cursor-pointer"
             >
-              Pick your player
+              Pick your player(s)
             </button>
             <button
               type="button"

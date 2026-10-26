@@ -857,6 +857,48 @@ export async function adminRemoveAlbumTag(
   }
 }
 
+/** Admin Tag Sweep: add a manual tag as the admin (the initial-seed pass).
+ *  Unlike the public addAlbumTag, this is not tied to a visitor claim —
+ *  the admin can tag ANY player on the album's roster. The tag records
+ *  taggedByVisitorId "admin" so the moderation list can attribute it, and
+ *  it behaves like any other manual tag for My Player / ZIP purposes. */
+export async function adminAddAlbumTag(
+  albumId: string,
+  photoId: string,
+  playerKey: string
+): Promise<{ success: boolean; tags: AdminAudienceTag[]; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, tags: [], error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, tags: [], error: "R2_BUCKET_NAME is not set." };
+
+    const id = String(albumId || "").trim();
+    const pid = String(photoId || "").trim();
+    const key = String(playerKey || "").trim();
+    if (!id || !pid || !key) return { success: false, tags: [], error: "Missing tag details." };
+
+    const data = await readTagsFile(id);
+    // One record per (photo, player); a duplicate add is a no-op success.
+    if (data.tags.some((t) => t.photoId === pid && t.playerKey === key)) {
+      return { success: true, tags: data.tags as AdminAudienceTag[] };
+    }
+    data.tags.push({
+      photoId: pid,
+      playerKey: key,
+      taggedByVisitorId: "admin",
+      createdAt: Date.now(),
+      source: "manual",
+    });
+    const ok = await writeTagsFile(id, data);
+    if (!ok) return { success: false, tags: data.tags as AdminAudienceTag[], error: "Could not save." };
+    return { success: true, tags: data.tags as AdminAudienceTag[] };
+  } catch (err: any) {
+    return { success: false, tags: [], error: err?.message || String(err) };
+  }
+}
+
 /** Bulk-clear every machine-made tag on an album and reset the
  *  auto-processed markers, so auto-tag can be re-run from scratch.
  *  Human (manual) tags are never touched. */

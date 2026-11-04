@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1024, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta http-equiv="refresh" content="1800">
+<title>Beck Envelopes</title>
+<style>
+  html, body { margin:0; padding:0; background:#101418; color:#f2f5f7;
+    font-family:-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #wrap { padding:18px 22px 10px 22px; }
+  #head { overflow:hidden; margin-bottom:8px; }
+  #title { float:left; font-size:30px; font-weight:700; letter-spacing:.3px; }
+  #title .sub { display:block; font-size:14px; font-weight:400; color:#9fb2bf; margin-top:2px; }
+  #clock { float:right; text-align:right; }
+  #clock .time { font-size:30px; font-weight:700; }
+  #clock .date { font-size:14px; color:#9fb2bf; margin-top:2px;}
+  .env { background:#1a2129; border-radius:14px; padding:10px 16px 11px 16px; margin-bottom:9px; }
+  .env .row1 { overflow:hidden; }
+  .env .name { float:left; font-size:21px; font-weight:700; }
+  .env .left { float:right; font-size:21px; font-weight:700; }
+  .env .left small { font-size:14px; font-weight:400; color:#9fb2bf; }
+  .env .meta { font-size:14px; color:#9fb2bf; margin:3px 0 8px 0; }
+  .bar { position:relative; height:26px; background:#0b0e11; border-radius:13px; overflow:hidden; }
+  .fill { position:absolute; left:0; top:0; bottom:0; border-radius:15px; }
+  .pace { position:absolute; top:-2px; bottom:-2px; width:3px; background:#f2f5f7; opacity:.55; }
+  .ok   { background:#2fbf71; }
+  .warn { background:#f2b134; }
+  .over { background:#e74c3c; }
+  .info { background:#4a90d9; }
+  .trackers { overflow:hidden; }
+  .trk { float:left; width:48.5%; background:#1a2129; border-radius:14px; padding:10px 16px; box-sizing:border-box; }
+  .trk + .trk { float:right; }
+  .trk .tname { font-size:17px; font-weight:700; color:#cfe0ec; }
+  .trk .tval { font-size:24px; font-weight:700; margin-top:2px; }
+  .trk .tnote { font-size:13px; color:#9fb2bf; margin-top:2px; }
+  #sweep { background:#16281e; border:1px solid #2fbf71; border-radius:14px; padding:11px 16px; margin-bottom:11px; }
+  #sweep .sname { font-size:19px; font-weight:700; color:#8fe3b5; }
+  #sweep .sval { font-size:15px; color:#cfe8d8; margin-top:2px; }
+  #foot { font-size:12.5px; color:#7d8f9c; text-align:center; padding:2px 0 6px 0; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="head">
+    <div id="title">Beck Family Envelopes<span class="sub" id="subtitle"></span></div>
+    <div id="clock"><div class="time" id="time"></div><div class="date" id="date"></div></div>
+  </div>
+  <div id="sweep"></div>
+  <div id="envs"></div>
+  <div class="trackers" id="trackers"></div>
+  <div id="foot"></div>
+</div>
+
+<script>
+/* === DATA BLOCK ===
+   The feed job (Plaid pull, twice a day) will rewrite this block.
+   spent/cap in dollars. cap:0 = tracker only, no limit.        */
+var DATA = {
+  monthLabel: "Prototype — October 2026 actuals vs the November caps",
+  monthFraction: 1.0,               /* Oct is complete; live months use day-of-month / days-in-month */
+  updatedLabel: "Demo data — no live feed connected yet",
+  sweep: { medical: 250, sinking: 250, note: "Payday sweep starts in November — $250 to medical debt, $250 to the sinking fund." },
+  envelopes: [
+    { name:"Groceries",      icon:"🛒", cap:2300, spent:2215.20, note:"Aldi-first; Food Lion list-only fill-ins" },
+    { name:"Fast Food",      icon:"🍔", cap:600,  spent:1029.60, note:"One planned family night a week + emergencies" },
+    { name:"Restaurants",    icon:"🍽️", cap:200,  spent:14.15,   note:"Real sit-down meals — protected from fast-food creep" },
+    { name:"Gas Station Runs", icon:"⛽", cap:40, spent:69.00, est:true, note:"Water & snacks from home (Oct figure is an estimate)" },
+    { name:"Blow Money — Jae", icon:"🎧", cap:200, spent:592.26, note:"October was cruise month — the exception, not the pace" }
+  ],
+  trackers: [
+    { name:"Sports (no cap — protected)", val:"$945", note:"October actual. Canes draft runs ~$300/mo year-round" },
+    { name:"Gas & Fuel", val:"$686", note:"October actual. Eases in November with the season break" }
+  ]
+};
+/* === END DATA BLOCK === */
+
+function money(n){ return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function money2(n){ return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
+function render(){
+  document.getElementById("subtitle").innerHTML = DATA.monthLabel;
+  var sw = DATA.sweep;
+  document.getElementById("sweep").innerHTML =
+    '<div class="sname">💰 The Payday Sweep — ' + money(sw.medical + sw.sinking) + '</div>' +
+    '<div class="sval">' + sw.note + '</div>';
+
+  var html = "";
+  for (var i=0; i<DATA.envelopes.length; i++){
+    var e = DATA.envelopes[i];
+    var pct = Math.round(e.spent / e.cap * 100);
+    var left = e.cap - e.spent;
+    var cls = pct >= 100 ? "over" : (pct > DATA.monthFraction*100 + 10 ? "warn" : "ok");
+    var width = Math.min(pct, 100);
+    var leftTxt = left >= 0
+      ? money(left) + ' <small>left of ' + money(e.cap) + '</small>'
+      : '<span style="color:#ff8a7a">' + money(-left) + ' OVER</span> <small>of ' + money(e.cap) + '</small>';
+    html += '<div class="env"><div class="row1"><div class="name">' + e.icon + ' ' + e.name + '</div>' +
+      '<div class="left">' + leftTxt + '</div></div>' +
+      '<div class="meta">Spent ' + money2(e.spent) + (e.est ? ' (est.)' : '') + ' — ' + pct + '% of envelope · ' + e.note + '</div>' +
+      '<div class="bar"><div class="fill ' + cls + '" style="width:' + width + '%"></div>' +
+      (DATA.monthFraction < 1 ? '<div class="pace" style="left:' + Math.round(DATA.monthFraction*100) + '%"></div>' : '') +
+      '</div></div>';
+  }
+  document.getElementById("envs").innerHTML = html;
+
+  var th = "";
+  for (var j=0; j<DATA.trackers.length; j++){
+    var t = DATA.trackers[j];
+    th += '<div class="trk"><div class="tname">' + t.name + '</div><div class="tval">' + t.val + '</div><div class="tnote">' + t.note + '</div></div>';
+  }
+  document.getElementById("trackers").innerHTML = th;
+  document.getElementById("foot").innerHTML = DATA.updatedLabel + " · Bars turn yellow when spending runs ahead of the calendar, red at the cap. The white tick (live months) marks where the month has reached.";
+}
+
+function tick(){
+  var d = new Date();
+  var h = d.getHours(), m = d.getMinutes();
+  var ap = h >= 12 ? "PM" : "AM"; h = h % 12; if (h === 0) h = 12;
+  document.getElementById("time").innerHTML = h + ":" + (m < 10 ? "0" : "") + m + " " + ap;
+  var days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  var mos = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  document.getElementById("date").innerHTML = days[d.getDay()] + ", " + mos[d.getMonth()] + " " + d.getDate();
+}
+
+function loadData(){
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "data.json?ts=" + new Date().getTime(), true);
+    xhr.onreadystatechange = function(){
+      if (xhr.readyState === 4 && xhr.status === 200){
+        try { var fresh = JSON.parse(xhr.responseText); if (fresh && fresh.envelopes) { DATA = fresh; render(); } } catch(e){}
+      }
+    };
+    xhr.send(null);
+  } catch(e){}
+}
+loadData(); setInterval(loadData, 1800000);
+render(); tick(); setInterval(tick, 20000);
+</script>
+</body>
+</html>

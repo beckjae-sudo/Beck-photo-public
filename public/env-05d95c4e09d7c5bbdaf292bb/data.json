@@ -1,0 +1,60 @@
+{
+ "monthLabel": "Prototype — October 2026 actuals vs the November caps",
+ "monthFraction": 1,
+ "updatedLabel": "Demo data — no live feed connected yet",
+ "sweep": {
+  "medical": 250,
+  "sinking": 250,
+  "note": "Payday sweep starts in November — $250 to medical debt, $250 to the sinking fund."
+ },
+ "envelopes": [
+  {
+   "name": "Groceries",
+   "icon": "🛒",
+   "cap": 2300,
+   "spent": 2215.2,
+   "note": "Aldi-first; Food Lion list-only fill-ins"
+  },
+  {
+   "name": "Fast Food",
+   "icon": "🍔",
+   "cap": 600,
+   "spent": 1029.6,
+   "note": "One planned family night a week + emergencies"
+  },
+  {
+   "name": "Restaurants",
+   "icon": "🍽️",
+   "cap": 200,
+   "spent": 14.15,
+   "note": "Real sit-down meals — protected from fast-food creep"
+  },
+  {
+   "name": "Gas Station Runs",
+   "icon": "⛽",
+   "cap": 40,
+   "spent": 69,
+   "est": true,
+   "note": "Water & snacks from home (Oct figure is an estimate)"
+  },
+  {
+   "name": "Blow Money — Jae",
+   "icon": "🎧",
+   "cap": 200,
+   "spent": 592.26,
+   "note": "October was cruise month — the exception, not the pace"
+  }
+ ],
+ "trackers": [
+  {
+   "name": "Sports (no cap — protected)",
+   "val": "$945",
+   "note": "October actual. Canes draft runs ~$300/mo year-round"
+  },
+  {
+   "name": "Gas & Fuel",
+   "val": "$686",
+   "note": "October actual. Eases in November with the season break"
+  }
+ ]
+}

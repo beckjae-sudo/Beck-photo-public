@@ -30,6 +30,7 @@
   .warn { background:#f2b134; }
   .over { background:#e74c3c; }
   .info { background:#4a90d9; }
+  .pend { opacity:.55; background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.45) 0 6px, rgba(255,255,255,0) 6px, rgba(255,255,255,0) 12px); border-radius:0; }
   .trackers { overflow:hidden; }
   .trk { float:left; width:48.5%; background:#1a2129; border-radius:14px; padding:10px 16px; box-sizing:border-box; }
   .trk + .trk { float:right; }
@@ -93,14 +94,18 @@ function render(){
     var pct = Math.round(e.spent / e.cap * 100);
     var left = e.cap - e.spent;
     var cls = pct >= 100 ? "over" : (pct > DATA.monthFraction*100 + 10 ? "warn" : "ok");
+    var pend = e.pendingSpent || 0;
+    var settledPct = Math.round((e.spent - pend) / e.cap * 100);
     var width = Math.min(pct, 100);
+    var pendWidth = Math.max(Math.min(pct,100) - Math.min(settledPct,100), 0);
     var leftTxt = left >= 0
       ? money(left) + ' <small>left of ' + money(e.cap) + '</small>'
       : '<span style="color:#ff8a7a">' + money(-left) + ' OVER</span> <small>of ' + money(e.cap) + '</small>';
     html += '<div class="env"><div class="row1"><div class="name">' + e.icon + ' ' + e.name + '</div>' +
       '<div class="left">' + leftTxt + '</div></div>' +
-      '<div class="meta">Spent ' + money2(e.spent) + (e.est ? ' (est.)' : '') + ' — ' + pct + '% of envelope · ' + e.note + '</div>' +
-      '<div class="bar"><div class="fill ' + cls + '" style="width:' + width + '%"></div>' +
+      '<div class="meta">Spent ' + money2(e.spent) + (e.est ? ' (est.)' : '') + ' — ' + pct + '% of envelope' + (pend > 0 ? ' · incl. ' + money2(pend) + ' pending' : '') + ' · ' + e.note + '</div>' +
+      '<div class="bar"><div class="fill ' + cls + '" style="width:' + Math.min(settledPct,100) + '%"></div>' +
+      (pendWidth > 0 ? '<div class="fill pend ' + cls + '" style="left:' + Math.min(settledPct,100) + '%;width:' + pendWidth + '%"></div>' : '') +
       (DATA.monthFraction < 1 ? '<div class="pace" style="left:' + Math.round(DATA.monthFraction*100) + '%"></div>' : '') +
       '</div></div>';
   }

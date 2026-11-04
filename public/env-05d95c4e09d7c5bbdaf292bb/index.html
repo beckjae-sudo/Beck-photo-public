@@ -128,7 +128,8 @@ function tick(){
 function loadData(){
   try {
     var xhr = new XMLHttpRequest();
-    xhr.open("GET", "data.json?ts=" + new Date().getTime(), true);
+    var bp = window.location.pathname.replace(/\/?$/, "/");
+    xhr.open("GET", bp + "data.json?ts=" + new Date().getTime(), true);
     xhr.onreadystatechange = function(){
       if (xhr.readyState === 4 && xhr.status === 200){
         try { var fresh = JSON.parse(xhr.responseText); if (fresh && fresh.envelopes) { DATA = fresh; render(); } } catch(e){}

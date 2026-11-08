@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
  "monthFraction": 0.267,
- "updatedLabel": "Updated Sun Nov 08, 12:23 PM · posted + pending from SECU checking",
+ "updatedLabel": "Updated Sun Nov 08, 11:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -20,8 +20,8 @@
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 176.98,
-   "pendingSpent": 71.47,
+   "spent": 205.37,
+   "pendingSpent": 99.86,
    "note": "One planned family night a week + emergencies (incl. coffee)"
   },
   {

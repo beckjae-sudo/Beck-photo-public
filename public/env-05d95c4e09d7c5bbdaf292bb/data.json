@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.233,
- "updatedLabel": "Updated Sat Nov 07, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.267,
+ "updatedLabel": "Updated Sun Nov 08, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -12,16 +12,16 @@
    "name": "Groceries",
    "icon": "🛒",
    "cap": 2300,
-   "spent": 546.42,
-   "pendingSpent": 0,
+   "spent": 749.34,
+   "pendingSpent": 202.92,
    "note": "Aldi-first; Food Lion list-only fill-ins"
   },
   {
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 105.51,
-   "pendingSpent": 0,
+   "spent": 176.98,
+   "pendingSpent": 71.47,
    "note": "One planned family night a week + emergencies (incl. coffee)"
   },
   {

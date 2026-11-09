@@ -90,7 +90,31 @@ export default function EditAlbumView() {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
+  // Pointer-events drag for touch/pen (HTML5 drag-and-drop below stays
+  // mouse-only in practice: touch browsers never fire it). A 280ms
+  // long-press activates the drag so ordinary touch scrolling still works.
+  const [isPointerDragging, setIsPointerDragging] = useState(false);
+  // HTML5 `draggable` is enabled only for mouse pointers. On touch, a
+  // long-press on a draggable element can start a native HTML5 drag in
+  // Chrome/Android, which would fight the pointer-events drag below.
+  // pointerdown fires at touch start — long before the 280ms long-press
+  // activates — so flipping this per pointer type keeps the two apart.
+  const [html5Draggable, setHtml5Draggable] = useState(true);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerDragRef = useRef<{
+    startX: number;
+    startY: number;
+    index: number;
+    pointerId: number;
+  } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!albumId) return;
@@ -212,6 +236,87 @@ export default function EditAlbumView() {
       updated.splice(toIndex, 0, movedItem);
       return updated;
     });
+  };
+
+  // Pointer-events drag handlers (touch/pen only — mouse keeps HTML5 DnD)
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleCardPointerDown = (e: React.PointerEvent, index: number) => {
+    setHtml5Draggable(e.pointerType === "mouse");
+    if (e.pointerType === "mouse") return;
+    clearLongPressTimer();
+    pointerDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      index,
+      pointerId: e.pointerId,
+    };
+    const el = e.currentTarget as HTMLElement;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      setDraggedIdx(index);
+      setDragOverIdx(index);
+      setIsPointerDragging(true);
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {}
+      try {
+        navigator.vibrate?.(10);
+      } catch {}
+    }, 280);
+  };
+
+  const handleCardPointerMove = (e: React.PointerEvent) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+    if (!isPointerDragging) {
+      // Still inside the long-press window: moving >12px means the user is
+      // scrolling, so cancel the pending drag.
+      if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 12) {
+        clearLongPressTimer();
+        pointerDragRef.current = null;
+      }
+      return;
+    }
+    e.preventDefault();
+    const target = document
+      .elementFromPoint(e.clientX, e.clientY)
+      ?.closest("[data-photo-idx]");
+    if (target) {
+      const idxAttr = target.getAttribute("data-photo-idx");
+      const over = idxAttr !== null ? parseInt(idxAttr, 10) : NaN;
+      if (!Number.isNaN(over) && over !== dragOverIdx) {
+        setDragOverIdx(over);
+      }
+    }
+  };
+
+  const finishPointerDrag = (e: React.PointerEvent) => {
+    clearLongPressTimer();
+    pointerDragRef.current = null;
+    if (!isPointerDragging) return;
+    setIsPointerDragging(false);
+    // Same reorder handleDrop performs: move dragged item to dragOverIdx.
+    if (draggedIdx !== null && dragOverIdx !== null && dragOverIdx !== draggedIdx) {
+      const from = draggedIdx;
+      const to = dragOverIdx;
+      setPhotos((prev) => {
+        const updated = [...prev];
+        const [movedItem] = updated.splice(from, 1);
+        updated.splice(to, 0, movedItem);
+        return updated;
+      });
+    }
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -560,7 +665,7 @@ export default function EditAlbumView() {
                 Existing Media ({photos.length})
               </h3>
               <p className="text-[11px] text-neutral-500">
-                Drag cards to reorder sequence • Hover to use nudge arrows • Click star to set cover
+                Drag cards to reorder (press and hold on touch screens) • Use the arrows to nudge • Click star to set cover
               </p>
             </div>
           </div>
@@ -575,12 +680,18 @@ export default function EditAlbumView() {
               return (
                 <div
                   key={photo.id}
-                  draggable
+                  data-photo-idx={idx}
+                  draggable={html5Draggable}
                   onDragStart={(e) => handleDragStart(e, idx)}
                   onDragOver={(e) => handleDragOver(e, idx)}
                   onDrop={(e) => handleDrop(e, idx)}
                   onDragEnd={handleDragEnd}
-                  className={`group relative aspect-square rounded-lg overflow-hidden bg-neutral-900 border cursor-grab active:cursor-grabbing transition-all ${
+                  onPointerDown={(e) => handleCardPointerDown(e, idx)}
+                  onPointerMove={handleCardPointerMove}
+                  onPointerUp={finishPointerDrag}
+                  onPointerCancel={finishPointerDrag}
+                  style={isPointerDragging ? { touchAction: "none" } : undefined}
+                  className={`group relative aspect-square rounded-lg overflow-hidden bg-neutral-900 border cursor-grab active:cursor-grabbing transition-all [-webkit-touch-callout:none] ${
                     isCover ? "border-amber-500 ring-2 ring-amber-500/30" : "border-neutral-800 hover:border-neutral-700"
                   } ${isDragged ? "opacity-25 scale-95" : "opacity-100"} ${
                     isDragOver ? "border-blue-500 ring-2 ring-blue-500/60 scale-105" : ""
@@ -606,7 +717,7 @@ export default function EditAlbumView() {
                   )}
 
                   {/* Hover Grab Indicator */}
-                  <div className="absolute inset-0 flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition pointer-events-none">
+                  <div className="absolute inset-0 flex items-center justify-center opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition pointer-events-none">
                     <span className="p-1 rounded-md bg-black/70 text-white backdrop-blur-sm shadow-md">
                       <GripVertical size={14} />
                     </span>
@@ -641,7 +752,7 @@ export default function EditAlbumView() {
                   </div>
 
                   {/* Bottom-Right Step Nudge Arrows */}
-                  <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition z-10">
+                  <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition z-10">
                     <button
                       type="button"
                       disabled={idx === 0}
@@ -649,10 +760,10 @@ export default function EditAlbumView() {
                         e.stopPropagation();
                         movePhotoStep(idx, "left");
                       }}
-                      className="p-1.5 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
+                      className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
                       title="Move media earlier in sequence"
                     >
-                      <ChevronLeft size={12} />
+                      <ChevronLeft size={16} />
                     </button>
                     <button
                       type="button"
@@ -661,10 +772,10 @@ export default function EditAlbumView() {
                         e.stopPropagation();
                         movePhotoStep(idx, "right");
                       }}
-                      className="p-1.5 rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
+                      className="p-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center rounded bg-black/75 hover:bg-neutral-800 disabled:opacity-30 text-white transition cursor-pointer"
                       title="Move media later in sequence"
                     >
-                      <ChevronRight size={12} />
+                      <ChevronRight size={16} />
                     </button>
                   </div>
                 </div>

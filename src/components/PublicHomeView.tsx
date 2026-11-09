@@ -357,7 +357,7 @@ export default function PublicHomeView({
                   <LayoutGrid size={13} />
                   <span>Browse by category</span>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-2 -mx-6 px-6 no-scrollbar">
+                <div className="flex flex-wrap gap-2">
                   {categories.map((cat) => (
                     <Link
                       key={cat}

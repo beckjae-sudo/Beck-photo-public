@@ -27,6 +27,8 @@ import {
   Play,
   Tag,
   UserRound,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import SupportModal, { FundType } from "@/components/SupportModal";
 import ShareSheet from "@/components/ShareSheet";
@@ -241,6 +243,20 @@ export default function PublicAlbumView() {
   const cueTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const exitPromptTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Desktop (mouse) zoom controls for the standard lightbox: the outer
+  // lightbox element (wheel listener target) and mouse-pan bookkeeping.
+  const lightboxRef = useRef<HTMLDivElement | null>(null);
+  const mousePanRef = useRef<{
+    startX: number;
+    startY: number;
+    startPanX: number;
+    startPanY: number;
+    moved: boolean;
+  } | null>(null);
+  // Set when a mouse pan ends with real movement, so the click event that
+  // follows pointerup doesn't also toggle zoom.
+  const suppressZoomClickRef = useRef(false);
+
   const photos = album?.photos || [];
 
   // ---- Phase 1 derived state ----
@@ -446,6 +462,118 @@ export default function PublicAlbumView() {
   const clampedPanX = Math.min(zoomLayout.maxPanX, Math.max(-zoomLayout.maxPanX, panOffset.x));
   const clampedPanY = Math.min(zoomLayout.maxPanY, Math.max(-zoomLayout.maxPanY, panOffset.y));
   const isZoomed = zoomScale > 1.05 && zoomLayout.w > 0;
+
+  // Shared zoom setter for the mouse controls (wheel, click-to-zoom,
+  // slider/buttons). When a viewport point is given, pan is adjusted so
+  // that point stays roughly centered as the scale changes; the existing
+  // clampedPan rendering keeps the result in bounds.
+  const setZoom = useCallback(
+    (newScale: number, centerX?: number, centerY?: number) => {
+      const oldScale = zoomScaleRef.current;
+      const clamped = Math.min(4, Math.max(1, newScale));
+      if (
+        centerX !== undefined &&
+        centerY !== undefined &&
+        typeof window !== "undefined" &&
+        clamped > 1 &&
+        clamped !== oldScale
+      ) {
+        const ratio = clamped / oldScale - 1;
+        const nextPan = {
+          x: panOffsetRef.current.x - (centerX - window.innerWidth / 2) * ratio,
+          y: panOffsetRef.current.y - (centerY - window.innerHeight / 2) * ratio,
+        };
+        panOffsetRef.current = nextPan;
+        setPanOffset(nextPan);
+      }
+      zoomScaleRef.current = clamped;
+      setZoomScale(clamped);
+      if (clamped > 1) {
+        ensureHighRes(selectedPhoto);
+      }
+      if (clamped <= 1) {
+        panOffsetRef.current = { x: 0, y: 0 };
+        setPanOffset({ x: 0, y: 0 });
+      }
+    },
+    [ensureHighRes, selectedPhoto]
+  );
+
+  // Wheel zoom for the standard lightbox (photos only). Attached natively
+  // with passive:false so the page behind doesn't scroll; attached to the
+  // outer lightbox div so it works over the image and the backdrop alike.
+  useEffect(() => {
+    const el = lightboxRef.current;
+    if (!el || !selectedPhoto || selectedPhoto.type === "video" || isImmersive) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      setZoom(zoomScaleRef.current * factor, e.clientX, e.clientY);
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [selectedPhoto, isImmersive, setZoom]);
+
+  // Click-to-zoom on the image (hover-capable devices only): 1x → 2.5x
+  // toward the click point; zoomed → back to 1x. A preceding mouse pan
+  // (movement >= 5px) suppresses the toggle via suppressZoomClickRef.
+  const handleImageClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (suppressZoomClickRef.current) {
+      suppressZoomClickRef.current = false;
+      return;
+    }
+    if (!canHover || !selectedPhoto || selectedPhoto.type === "video") return;
+    if (zoomScaleRef.current <= 1.05) {
+      setZoom(2.5, e.clientX, e.clientY);
+    } else {
+      setZoom(1);
+    }
+  };
+
+  // Mouse drag to pan while zoomed (pointer events, mouse only — touch
+  // keeps its own gesture handlers on the outer lightbox div).
+  const handleImagePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType !== "mouse" || !isZoomed) return;
+    mousePanRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startPanX: panOffsetRef.current.x,
+      startPanY: panOffsetRef.current.y,
+      moved: false,
+    };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handleImagePointerMove = (e: React.PointerEvent) => {
+    const pan = mousePanRef.current;
+    if (!pan) return;
+    const dx = e.clientX - pan.startX;
+    const dy = e.clientY - pan.startY;
+    if (Math.hypot(dx, dy) >= 5) pan.moved = true;
+    if (pan.moved) {
+      const nextPan = { x: pan.startPanX + dx, y: pan.startPanY + dy };
+      panOffsetRef.current = nextPan;
+      setPanOffset(nextPan);
+    }
+  };
+
+  const handleImagePointerUp = (e: React.PointerEvent) => {
+    const pan = mousePanRef.current;
+    mousePanRef.current = null;
+    if (pan?.moved) {
+      suppressZoomClickRef.current = true;
+      // Safety net: clear the flag if no click consumes it.
+      setTimeout(() => {
+        suppressZoomClickRef.current = false;
+      }, 50);
+    }
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+  };
 
   // Touch Gestures
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -1732,6 +1860,7 @@ export default function PublicAlbumView() {
       {/* Lightbox Modal (Unified Photos & Video Player) */}
       {selectedPhoto !== null && selectedIndex !== null && (
         <div
+          ref={lightboxRef}
           className={`fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden touch-none ${
             isImmersive ? "w-screen h-[100dvh]" : "bg-black/95 backdrop-blur-md"
           }`}
@@ -1961,7 +2090,9 @@ export default function PublicAlbumView() {
                 </div>
               ) : (
                 <div
-                  className="flex items-center justify-center shrink-0"
+                  className={`flex items-center justify-center shrink-0 ${
+                    canHover ? (isZoomed ? "cursor-zoom-out" : "cursor-zoom-in") : ""
+                  }`}
                   style={{
                     ...(isZoomed
                       ? { width: zoomLayout.w, height: zoomLayout.h }
@@ -1969,7 +2100,11 @@ export default function PublicAlbumView() {
                     transform: `translate3d(${clampedPanX + (isZoomed ? 0 : dragOffset)}px, ${clampedPanY}px, 0px)`,
                     touchAction: "none",
                   }}
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={handleImageClick}
+                  onPointerDown={handleImagePointerDown}
+                  onPointerMove={handleImagePointerMove}
+                  onPointerUp={handleImagePointerUp}
+                  onPointerCancel={handleImagePointerUp}
                 >
                   <img
                     key={selectedPhoto.id}
@@ -1984,6 +2119,50 @@ export default function PublicAlbumView() {
                     }
                     draggable={false}
                   />
+                </div>
+              )}
+
+              {/* Zoom control bar (Google Photos style) — standard lightbox,
+                  photos only. Centered so it clears the bottom-left tag chips. */}
+              {selectedPhoto.type !== "video" && (
+                <div
+                  className="absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3 py-2 rounded-full bg-black/70 border border-white/10 backdrop-blur-md"
+                  onClick={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onTouchMove={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setZoom(zoomScale / 1.4)}
+                    className="p-1.5 rounded-full text-neutral-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                    title="Zoom out"
+                    aria-label="Zoom out"
+                  >
+                    <ZoomOut size={16} />
+                  </button>
+                  <input
+                    type="range"
+                    min={1}
+                    max={4}
+                    step={0.01}
+                    value={zoomScale}
+                    onChange={(e) => setZoom(parseFloat(e.target.value))}
+                    className="w-40 sm:w-56 accent-white cursor-pointer"
+                    aria-label="Zoom level"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setZoom(zoomScale * 1.4)}
+                    className="p-1.5 rounded-full text-neutral-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                    title="Zoom in"
+                    aria-label="Zoom in"
+                  >
+                    <ZoomIn size={16} />
+                  </button>
+                  <span className="text-[11px] font-mono text-neutral-300 w-10 text-right">
+                    {Math.round(zoomScale * 100)}%
+                  </span>
                 </div>
               )}
             </>

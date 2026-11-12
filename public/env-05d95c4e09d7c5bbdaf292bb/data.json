@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.367,
- "updatedLabel": "Updated Wed Nov 11, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.4,
+ "updatedLabel": "Updated Thu Nov 12, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -44,8 +44,8 @@
    "name": "Blow Money — Jae & Jennifer",
    "icon": "🎧",
    "cap": 200,
-   "spent": 19.47,
-   "pendingSpent": 0,
+   "spent": 40.0,
+   "pendingSpent": 20.53,
    "note": "Combined envelope — $100 each"
   }
  ],

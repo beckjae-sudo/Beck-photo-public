@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.433,
- "updatedLabel": "Updated Fri Nov 13, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.467,
+ "updatedLabel": "Updated Sat Nov 14, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -12,24 +12,24 @@
    "name": "Groceries",
    "icon": "🛒",
    "cap": 2300,
-   "spent": 1115.65,
-   "pendingSpent": 114.43,
+   "spent": 1136.99,
+   "pendingSpent": 4.59,
    "note": "Aldi-first; Food Lion list-only fill-ins"
   },
   {
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 243.68,
-   "pendingSpent": 38.31,
+   "spent": 277.72,
+   "pendingSpent": 8.56,
    "note": "One planned family night a week + emergencies (incl. coffee)"
   },
   {
    "name": "Restaurants",
    "icon": "🍽️",
    "cap": 200,
-   "spent": 88.01,
-   "pendingSpent": 0,
+   "spent": 111.37,
+   "pendingSpent": 23.36,
    "note": "Real sit-down meals — protected from fast-food creep"
   },
   {
@@ -44,15 +44,15 @@
    "name": "Blow Money — Jae & Jennifer",
    "icon": "🎧",
    "cap": 200,
-   "spent": 37.31,
-   "pendingSpent": 17.84,
+   "spent": 40.0,
+   "pendingSpent": 7.03,
    "note": "Combined envelope — $100 each"
   }
  ],
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
-   "val": "$113",
+   "val": "$142",
    "note": "This month, from the bank feed"
   },
   {

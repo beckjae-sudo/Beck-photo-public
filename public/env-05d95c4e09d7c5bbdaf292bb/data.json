@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
  "monthFraction": 0.533,
- "updatedLabel": "Updated Mon Nov 16, 01:21 PM · posted + pending from SECU checking",
+ "updatedLabel": "Updated Mon Nov 16, 01:46 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -14,7 +14,153 @@
    "cap": 2300,
    "spent": 1622.95,
    "pendingSpent": 395.09,
-   "note": "Aldi-first; Food Lion list-only fill-ins"
+   "note": "Aldi-first; Food Lion list-only fill-ins",
+   "charges": [
+    {
+     "d": "2026-11-15",
+     "n": "Food Lion",
+     "a": 219.55,
+     "p": 1
+    },
+    {
+     "d": "2026-11-15",
+     "n": "Aldi",
+     "a": 115.37,
+     "p": 1
+    },
+    {
+     "d": "2026-11-15",
+     "n": "Publix",
+     "a": 30.18,
+     "p": 1
+    },
+    {
+     "d": "2026-11-15",
+     "n": "Food Lion",
+     "a": 25.4,
+     "p": 1
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Food Lion",
+     "a": 93.76,
+     "p": 0
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Dollar Tree",
+     "a": 20.67,
+     "p": 0
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Food Lion",
+     "a": 4.59,
+     "p": 1
+    },
+    {
+     "d": "2026-11-12",
+     "n": "Food Lion",
+     "a": 16.75,
+     "p": 0
+    },
+    {
+     "d": "2026-11-10",
+     "n": "Aldi",
+     "a": 143.89,
+     "p": 0
+    },
+    {
+     "d": "2026-11-10",
+     "n": "Food Lion",
+     "a": 27.35,
+     "p": 0
+    },
+    {
+     "d": "2026-11-10",
+     "n": "Food Lion",
+     "a": 16.22,
+     "p": 0
+    },
+    {
+     "d": "2026-11-10",
+     "n": "Food Lion",
+     "a": 5.49,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Food Lion",
+     "a": 202.92,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Publix",
+     "a": 39.93,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Food Lion",
+     "a": 9.82,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Publix",
+     "a": 9.18,
+     "p": 0
+    },
+    {
+     "d": "2026-11-06",
+     "n": "Food Lion",
+     "a": 125.21,
+     "p": 0
+    },
+    {
+     "d": "2026-11-06",
+     "n": "Walmart",
+     "a": 54,
+     "p": 0
+    },
+    {
+     "d": "2026-11-04",
+     "n": "Publix",
+     "a": 88.14,
+     "p": 0
+    },
+    {
+     "d": "2026-11-04",
+     "n": "Food Lion",
+     "a": 40.13,
+     "p": 0
+    },
+    {
+     "d": "2026-11-03",
+     "n": "Food Lion",
+     "a": 14.32,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Food Lion",
+     "a": 183.86,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Target",
+     "a": 95.46,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Harris Teeter Supermarkets",
+     "a": 40.76,
+     "p": 0
+    }
+   ]
   },
   {
    "name": "Fast Food",
@@ -22,7 +168,123 @@
    "cap": 600,
    "spent": 280.96,
    "pendingSpent": 8.56,
-   "note": "One planned family night a week + emergencies (incl. coffee)"
+   "note": "One planned family night a week + emergencies (incl. coffee)",
+   "charges": [
+    {
+     "d": "2026-11-13",
+     "n": "Dunkin'",
+     "a": 17.34,
+     "p": 0
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Chick-fil-A",
+     "a": 16.92,
+     "p": 1
+    },
+    {
+     "d": "2026-11-13",
+     "n": "McDonald's",
+     "a": 11.87,
+     "p": 0
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Panda Express",
+     "a": 9.1,
+     "p": 0
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Chick-fil-A",
+     "a": -8.36,
+     "p": 1
+    },
+    {
+     "d": "2026-11-12",
+     "n": "Chick-fil-A",
+     "a": 25.48,
+     "p": 0
+    },
+    {
+     "d": "2026-11-10",
+     "n": "Hardee's",
+     "a": 28.39,
+     "p": 0
+    },
+    {
+     "d": "2026-11-10",
+     "n": "CVS",
+     "a": 3.24,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "KFC",
+     "a": 31,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Firehouse Subs",
+     "a": 20.63,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Chick-fil-A",
+     "a": 14.65,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Chick-fil-A",
+     "a": 5.19,
+     "p": 0
+    },
+    {
+     "d": "2026-11-04",
+     "n": "Chick-fil-A",
+     "a": 28.92,
+     "p": 0
+    },
+    {
+     "d": "2026-11-04",
+     "n": "Dunkin'",
+     "a": 15.6,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Pizza Hut",
+     "a": 24.57,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Hardee's",
+     "a": 15.07,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Chick-fil-A",
+     "a": 11.13,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Dairi-O",
+     "a": 7.05,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Chick-fil-A",
+     "a": 3.17,
+     "p": 0
+    }
+   ]
   },
   {
    "name": "Restaurants",
@@ -30,7 +292,45 @@
    "cap": 200,
    "spent": 111.37,
    "pendingSpent": 23.36,
-   "note": "Real sit-down meals — protected from fast-food creep"
+   "note": "Real sit-down meals — protected from fast-food creep",
+   "charges": [
+    {
+     "d": "2026-11-13",
+     "n": "The Family Pizzagalli",
+     "a": 23.36,
+     "p": 1
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Due Amici Pizza",
+     "a": 46.39,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Yeung's Lotus Express",
+     "a": 29.92,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Due Amici Pizza",
+     "a": 5.62,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Due Amici Pizza",
+     "a": 5.07,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Yeung's Lotus Express",
+     "a": 1.01,
+     "p": 0
+    }
+   ]
   },
   {
    "name": "Gas Station Runs",
@@ -38,7 +338,57 @@
    "cap": 40,
    "spent": 64.01,
    "pendingSpent": 12.57,
-   "note": "Water & snacks from home instead"
+   "note": "Water & snacks from home instead",
+   "charges": [
+    {
+     "d": "2026-11-15",
+     "n": "BP",
+     "a": 5.95,
+     "p": 1
+    },
+    {
+     "d": "2026-11-12",
+     "n": "QuikTrip",
+     "a": 6.62,
+     "p": 1
+    },
+    {
+     "d": "2026-11-10",
+     "n": "BP",
+     "a": 6.62,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Gate",
+     "a": 12.99,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "Citgo",
+     "a": 4.54,
+     "p": 0
+    },
+    {
+     "d": "2026-11-06",
+     "n": "7-Eleven",
+     "a": 8.98,
+     "p": 0
+    },
+    {
+     "d": "2026-11-03",
+     "n": "Circle K",
+     "a": 8.85,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "QuikTrip",
+     "a": 9.46,
+     "p": 0
+    }
+   ]
   },
   {
    "name": "Blow Money — Jae & Jennifer",
@@ -46,19 +396,157 @@
    "cap": 200,
    "spent": 76.05,
    "pendingSpent": 43.08,
-   "note": "Combined envelope — $100 each"
+   "note": "Combined envelope — $100 each",
+   "charges": [
+    {
+     "d": "2026-11-15",
+     "n": "Amazon",
+     "a": -18.39,
+     "p": 1
+    },
+    {
+     "d": "2026-11-14",
+     "n": "Amazon",
+     "a": 37.24,
+     "p": 1
+    },
+    {
+     "d": "2026-11-14",
+     "n": "Amazon",
+     "a": 17.2,
+     "p": 1
+    },
+    {
+     "d": "2026-11-13",
+     "n": "Amazon",
+     "a": 10.81,
+     "p": 0
+    },
+    {
+     "d": "2026-11-12",
+     "n": "Amazon",
+     "a": 2.69,
+     "p": 0
+    },
+    {
+     "d": "2026-11-11",
+     "n": "Amazon",
+     "a": 7.03,
+     "p": 1
+    },
+    {
+     "d": "2026-11-06",
+     "n": "Amazon",
+     "a": -32.46,
+     "p": 0
+    },
+    {
+     "d": "2026-11-06",
+     "n": "Amazon",
+     "a": -32.46,
+     "p": 0
+    },
+    {
+     "d": "2026-11-05",
+     "n": "Amazon",
+     "a": 10.81,
+     "p": 0
+    },
+    {
+     "d": "2026-11-03",
+     "n": "Amazon",
+     "a": 19.47,
+     "p": 0
+    },
+    {
+     "d": "2026-11-02",
+     "n": "Amazon",
+     "a": 54.11,
+     "p": 0
+    }
+   ]
   }
  ],
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
    "val": "$150",
-   "note": "This month, from the bank feed"
+   "note": "This month, from the bank feed",
+   "charges": [
+    {
+     "d": "2026-11-16",
+     "n": "Nintendo",
+     "a": 8.65,
+     "p": 1
+    },
+    {
+     "d": "2026-11-12",
+     "n": "AMC Theatres",
+     "a": 18.8,
+     "p": 0
+    },
+    {
+     "d": "2026-11-12",
+     "n": "YouTube",
+     "a": 9.73,
+     "p": 0
+    },
+    {
+     "d": "2026-11-06",
+     "n": "GoFan",
+     "a": 22,
+     "p": 0
+    },
+    {
+     "d": "2026-11-05",
+     "n": "D - Bat",
+     "a": 58,
+     "p": 0
+    },
+    {
+     "d": "2026-11-03",
+     "n": "GoFan",
+     "a": 33,
+     "p": 0
+    }
+   ]
   },
   {
    "name": "Gas & Fuel",
    "val": "$282",
-   "note": "This month, from the bank feed"
+   "note": "This month, from the bank feed",
+   "charges": [
+    {
+     "d": "2026-11-15",
+     "n": "BP",
+     "a": 54.47,
+     "p": 1
+    },
+    {
+     "d": "2026-11-10",
+     "n": "Circle K",
+     "a": 36.97,
+     "p": 0
+    },
+    {
+     "d": "2026-11-09",
+     "n": "QuikTrip",
+     "a": 54.43,
+     "p": 0
+    },
+    {
+     "d": "2026-11-03",
+     "n": "Circle K",
+     "a": 80.06,
+     "p": 0
+    },
+    {
+     "d": "2026-11-03",
+     "n": "Circle K",
+     "a": 56.06,
+     "p": 0
+    }
+   ]
   }
  ]
 }

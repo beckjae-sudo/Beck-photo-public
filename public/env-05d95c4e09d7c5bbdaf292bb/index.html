@@ -41,6 +41,13 @@
   #sweep .sname { font-size:19px; font-weight:700; color:#8fe3b5; }
   #sweep .sval { font-size:15px; color:#cfe8d8; margin-top:2px; }
   #foot { font-size:12.5px; color:#7d8f9c; text-align:center; padding:2px 0 6px 0; }
+  .charges { display:none; margin-top:9px; border-top:1px solid #2a343f; padding-top:6px; }
+  .charges .cline { overflow:hidden; font-size:15px; padding:3px 0; color:#dbe6ee; }
+  .charges .cdate { float:left; width:62px; color:#9fb2bf; }
+  .charges .cname { float:left; }
+  .charges .camt { float:right; font-weight:700; }
+  .charges .cpend { color:#f2b134; font-size:12.5px; font-weight:400; }
+  .tap { cursor:pointer; -webkit-tap-highlight-color:transparent; }
 </style>
 </head>
 <body>
@@ -80,8 +87,38 @@ var DATA = {
 
 function money(n){ return "$" + n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function money2(n){ return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+var MOS3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function dlabel(d){
+  if (!d) return "";
+  var p = String(d).split("-");
+  if (p.length !== 3) return esc(d);
+  return MOS3[parseInt(p[1],10)-1] + " " + parseInt(p[2],10);
+}
+function chargesHtml(list){
+  if (!list || !list.length) return "";
+  var h = "";
+  for (var k=0; k<list.length; k++){
+    var c = list[k];
+    h += '<div class="cline"><span class="cdate">' + dlabel(c.d) + '</span>' +
+      '<span class="cname">' + esc(c.n) + (c.p ? ' <span class="cpend">pending</span>' : '') + '</span>' +
+      '<span class="camt">' + money2(c.a) + '</span></div>';
+  }
+  return h;
+}
+var openChg = null;
+function toggleChg(key){
+  var el = document.getElementById("chg-" + key);
+  if (!el) return;
+  var was = (openChg === key);
+  var all = document.getElementsByClassName("charges");
+  for (var k=0; k<all.length; k++) all[k].style.display = "none";
+  openChg = was ? null : key;
+  if (!was) el.style.display = "block";
+}
 
 function render(){
+  openChg = null;
   document.getElementById("subtitle").innerHTML = DATA.monthLabel;
   var sw = DATA.sweep;
   document.getElementById("sweep").innerHTML =
@@ -101,20 +138,26 @@ function render(){
     var leftTxt = left >= 0
       ? money(left) + ' <small>left of ' + money(e.cap) + '</small>'
       : '<span style="color:#ff8a7a">' + money(-left) + ' OVER</span> <small>of ' + money(e.cap) + '</small>';
-    html += '<div class="env"><div class="row1"><div class="name">' + e.icon + ' ' + e.name + '</div>' +
+    var hasChg = e.charges && e.charges.length;
+    html += '<div class="env' + (hasChg ? ' tap' : '') + '"' + (hasChg ? ' onclick="toggleChg(\'env' + i + '\')"' : '') + '><div class="row1"><div class="name">' + e.icon + ' ' + e.name + '</div>' +
       '<div class="left">' + leftTxt + '</div></div>' +
-      '<div class="meta">Spent ' + money2(e.spent) + (e.est ? ' (est.)' : '') + ' — ' + pct + '% of envelope' + (pend > 0 ? ' · incl. ' + money2(pend) + ' pending' : '') + ' · ' + e.note + '</div>' +
+      '<div class="meta">Spent ' + money2(e.spent) + (e.est ? ' (est.)' : '') + ' — ' + pct + '% of envelope' + (pend > 0 ? ' · incl. ' + money2(pend) + ' pending' : '') + ' · ' + e.note + (hasChg ? ' · tap for charges' : '') + '</div>' +
       '<div class="bar"><div class="fill ' + cls + '" style="width:' + Math.min(settledPct,100) + '%"></div>' +
       (pendWidth > 0 ? '<div class="fill pend ' + cls + '" style="left:' + Math.min(settledPct,100) + '%;width:' + pendWidth + '%"></div>' : '') +
       (DATA.monthFraction < 1 ? '<div class="pace" style="left:' + Math.round(DATA.monthFraction*100) + '%"></div>' : '') +
-      '</div></div>';
+      '</div>' +
+      (hasChg ? '<div class="charges" id="chg-env' + i + '">' + chargesHtml(e.charges) + '</div>' : '') +
+      '</div>';
   }
   document.getElementById("envs").innerHTML = html;
 
   var th = "";
   for (var j=0; j<DATA.trackers.length; j++){
     var t = DATA.trackers[j];
-    th += '<div class="trk"><div class="tname">' + t.name + '</div><div class="tval">' + t.val + '</div><div class="tnote">' + t.note + '</div></div>';
+    var tHas = t.charges && t.charges.length;
+    th += '<div class="trk' + (tHas ? ' tap' : '') + '"' + (tHas ? ' onclick="toggleChg(\'trk' + j + '\')"' : '') + '><div class="tname">' + t.name + '</div><div class="tval">' + t.val + '</div><div class="tnote">' + t.note + (tHas ? ' · tap for charges' : '') + '</div>' +
+      (tHas ? '<div class="charges" id="chg-trk' + j + '">' + chargesHtml(t.charges) + '</div>' : '') +
+      '</div>';
   }
   document.getElementById("trackers").innerHTML = th;
   document.getElementById("foot").innerHTML = DATA.updatedLabel + " · Bars turn yellow when spending runs ahead of the calendar, red at the cap. The white tick (live months) marks where the month has reached.";

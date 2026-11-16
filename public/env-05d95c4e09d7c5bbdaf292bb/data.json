@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.5,
- "updatedLabel": "Updated Sun Nov 15, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.533,
+ "updatedLabel": "Updated Mon Nov 16, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -12,8 +12,8 @@
    "name": "Groceries",
    "icon": "🛒",
    "cap": 2300,
-   "spent": 1136.99,
-   "pendingSpent": 4.59,
+   "spent": 1527.49,
+   "pendingSpent": 395.09,
    "note": "Aldi-first; Food Lion list-only fill-ins"
   },
   {
@@ -36,16 +36,16 @@
    "name": "Gas Station Runs",
    "icon": "⛽",
    "cap": 40,
-   "spent": 58.06,
-   "pendingSpent": 6.62,
+   "spent": 64.01,
+   "pendingSpent": 12.57,
    "note": "Water & snacks from home instead"
   },
   {
    "name": "Blow Money — Jae & Jennifer",
    "icon": "🎧",
    "cap": 200,
-   "spent": 94.44,
-   "pendingSpent": 61.47,
+   "spent": 76.05,
+   "pendingSpent": 43.08,
    "note": "Combined envelope — $100 each"
   }
  ],
@@ -57,7 +57,7 @@
   },
   {
    "name": "Gas & Fuel",
-   "val": "$228",
+   "val": "$282",
    "note": "This month, from the bank feed"
   }
  ]

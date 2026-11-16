@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
  "monthFraction": 0.533,
- "updatedLabel": "Updated Mon Nov 16, 12:11 PM · posted + pending from SECU checking",
+ "updatedLabel": "Updated Mon Nov 16, 01:21 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -36,7 +36,7 @@
    "name": "Gas Station Runs",
    "icon": "⛽",
    "cap": 40,
-   "spent": 76.85,
+   "spent": 64.01,
    "pendingSpent": 12.57,
    "note": "Water & snacks from home instead"
   },
@@ -57,7 +57,7 @@
   },
   {
    "name": "Gas & Fuel",
-   "val": "$308",
+   "val": "$282",
    "note": "This month, from the bank feed"
   }
  ]

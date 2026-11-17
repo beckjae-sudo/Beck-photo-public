@@ -12,6 +12,7 @@ import {
   importAlbumsFromFamily,
   renameCategory,
   deleteCategory,
+  addCategory,
 } from "@/app/admin/actions";
 import {
   DEFAULT_PUBLIC_CONFIG,
@@ -510,25 +511,45 @@ export default function AdminStudioView() {
     return null;
   };
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
+    if (categoryBusy) return;
     const err = categoryNameError(newCategoryName);
     if (err) {
       setCategoryFormError(err);
       return;
     }
     const name = newCategoryName.trim();
-    setSiteConfig((prev) => ({
-      ...prev,
-      categories: [...prev.categories, name],
-      // New categories show immediately on the public site
-      visible_categories: prev.visible_categories.some(
-        (c) => c.trim().toLowerCase() === name.toLowerCase()
-      )
-        ? prev.visible_categories
-        : [...prev.visible_categories, name],
-    }));
-    setNewCategoryName("");
+    setCategoryBusy(true);
     setCategoryFormError("");
+    try {
+      // Persist to the site config right away (like rename/delete) so the
+      // upload form's server-side category check accepts the new category
+      // without waiting for a separate Save Settings.
+      const res = await addCategory(name);
+      if (!res.success) {
+        setCategoryFormError(res.error || "Could not add the category.");
+        return;
+      }
+      setSiteConfig((prev) => ({
+        ...prev,
+        categories: prev.categories.some(
+          (c) => c.trim().toLowerCase() === name.toLowerCase()
+        )
+          ? prev.categories
+          : [...prev.categories, name],
+        // New categories show immediately on the public site
+        visible_categories: prev.visible_categories.some(
+          (c) => c.trim().toLowerCase() === name.toLowerCase()
+        )
+          ? prev.visible_categories
+          : [...prev.visible_categories, name],
+      }));
+      setNewCategoryName("");
+    } catch (e: any) {
+      setCategoryFormError(e?.message || "Could not add the category.");
+    } finally {
+      setCategoryBusy(false);
+    }
   };
 
   const handleRenameCategory = async () => {
@@ -1391,9 +1412,10 @@ export default function AdminStudioView() {
             <div className="space-y-3">
               <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Category Manager</h3>
               <p className="text-[11px] text-neutral-500 leading-relaxed">
-                The canonical category list used by the upload form. Renaming a
-                category updates every album using it; a category can only be
-                deleted when no albums use it.
+                The canonical category list used by the upload form. Adding a
+                category saves it right away, so you can upload into it
+                immediately. Renaming a category updates every album using
+                it; a category can only be deleted when no albums use it.
               </p>
               {categoryFormError && (
                 <p className="text-xs text-red-400 flex items-center gap-1.5">
@@ -1490,15 +1512,17 @@ export default function AdminStudioView() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleAddCategory();
                   }}
+                  disabled={categoryBusy}
                   placeholder="New category name"
-                  className="flex-1 min-w-0 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600"
+                  className="flex-1 min-w-0 px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 disabled:opacity-50"
                 />
                 <button
                   type="button"
                   onClick={handleAddCategory}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[44px] rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition cursor-pointer shrink-0"
+                  disabled={categoryBusy}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[44px] rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition cursor-pointer shrink-0 disabled:opacity-50"
                 >
-                  <Plus size={15} /> Add
+                  <Plus size={15} /> {categoryBusy ? "Adding..." : "Add"}
                 </button>
               </div>
             </div>

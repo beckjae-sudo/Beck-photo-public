@@ -330,6 +330,45 @@ export async function deleteCategory(
   }
 }
 
+/**
+ * Add a category to the canonical list and persist it immediately (unlike a
+ * local-only edit, this saves to R2 right away, the same way rename/delete
+ * behave). New categories are also added to `visible_categories` so albums
+ * in them show on the public site right away. Rejected when the name is
+ * empty or already exists (case-insensitive).
+ */
+export async function addCategory(
+  name: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) return { success: false, error: "Unauthorized" };
+
+    const bucket = process.env.R2_BUCKET_NAME?.trim();
+    if (!bucket) return { success: false, error: "R2_BUCKET_NAME is not set." };
+
+    const target = String(name || "").trim();
+    if (!target) return { success: false, error: "Category name can't be empty." };
+
+    const config = await getPublicSiteConfig();
+    const key = target.toLowerCase();
+    if (config.categories.some((c) => c.trim().toLowerCase() === key))
+      return { success: false, error: `"${target}" already exists as a category.` };
+
+    config.categories = [...config.categories, target];
+    if (!config.visible_categories.some((c) => c.trim().toLowerCase() === key))
+      config.visible_categories = [...config.visible_categories, target];
+    await savePublicSiteConfigToR2(config);
+
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Upload pipeline (ported from the original site, retargeted to albums_public.json)

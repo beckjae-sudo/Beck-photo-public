@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.567,
- "updatedLabel": "Updated Tue Nov 17, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.6,
+ "updatedLabel": "Updated Wed Nov 18, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -12,10 +12,16 @@
    "name": "Groceries",
    "icon": "🛒",
    "cap": 2300,
-   "spent": 1622.95,
-   "pendingSpent": 115.37,
+   "spent": 1539.28,
+   "pendingSpent": 31.7,
    "note": "Aldi-first; Food Lion list-only fill-ins",
    "charges": [
+    {
+     "d": "2026-11-17",
+     "n": "Dollar Tree",
+     "a": 31.7,
+     "p": 1
+    },
     {
      "d": "2026-11-16",
      "n": "Food Lion",
@@ -39,12 +45,6 @@
      "n": "Food Lion",
      "a": 4.59,
      "p": 0
-    },
-    {
-     "d": "2026-11-15",
-     "n": "Aldi",
-     "a": 115.37,
-     "p": 1
     },
     {
      "d": "2026-11-13",
@@ -470,7 +470,7 @@
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
-   "val": "$156",
+   "val": "$147",
    "note": "This month, from the bank feed",
    "charges": [
     {
@@ -480,15 +480,9 @@
      "p": 1
     },
     {
-     "d": "2026-11-16",
-     "n": "Nintendo",
-     "a": 8.65,
-     "p": 1
-    },
-    {
-     "d": "2026-11-16",
+     "d": "2026-11-17",
      "n": "Apple",
-     "a": 2.99,
+     "a": 2.15,
      "p": 1
     },
     {

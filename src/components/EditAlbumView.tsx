@@ -15,6 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Play,
+  X,
+  Maximize2,
 } from "lucide-react";
 import {
   getDirectUploadUrl,
@@ -349,6 +351,49 @@ export default function EditAlbumView() {
     }
   };
 
+  // ---------- Quick scan: large one-at-a-time preview for cover/prune calls ----------
+  const [scanIdx, setScanIdx] = useState<number | null>(null);
+
+  const scanStep = (dir: 1 | -1) => {
+    setScanIdx((cur) => {
+      if (cur === null) return cur;
+      return Math.min(Math.max(cur + dir, 0), photos.length - 1);
+    });
+  };
+
+  const handleMarkFromScan = (photo: Photo) => {
+    const remaining = photos.length - 1;
+    handleMarkPhotoForDeletion(photo);
+    if (remaining <= 0) {
+      setScanIdx(null);
+    } else {
+      setScanIdx((cur) => (cur === null ? null : Math.min(cur, remaining - 1)));
+    }
+  };
+
+  useEffect(() => {
+    if (scanIdx === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setScanIdx(null);
+      } else if (e.key === "ArrowRight") {
+        scanStep(1);
+      } else if (e.key === "ArrowLeft") {
+        scanStep(-1);
+      } else if (e.key === "Delete") {
+        const p = photos[Math.min(scanIdx, photos.length - 1)];
+        if (p) handleMarkFromScan(p);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  });
+
   const handleSaveAllChanges = async () => {
     if (!album) return;
 
@@ -493,6 +538,9 @@ export default function EditAlbumView() {
       </div>
     );
   }
+
+  const scanPos = scanIdx !== null ? Math.min(scanIdx, Math.max(photos.length - 1, 0)) : 0;
+  const scanPhoto = scanIdx !== null && photos.length > 0 ? photos[scanPos] : null;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 pb-28">
@@ -667,7 +715,21 @@ export default function EditAlbumView() {
               <p className="text-[11px] text-neutral-500">
                 Drag cards to reorder (press and hold on touch screens) • Use the arrows to nudge • Click star to set cover
               </p>
+              {photosToDelete.length > 0 && (
+                <p className="text-[11px] text-red-400 mt-1">
+                  {photosToDelete.length} marked for deletion — applied when you Save Changes
+                </p>
+              )}
             </div>
+            <button
+              type="button"
+              onClick={() => photos.length > 0 && setScanIdx(0)}
+              disabled={photos.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-neutral-200 rounded-lg text-xs font-semibold transition cursor-pointer"
+              title="Open large one-at-a-time preview for cover and pruning decisions"
+            >
+              <Maximize2 size={13} /> Quick scan
+            </button>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
@@ -722,6 +784,19 @@ export default function EditAlbumView() {
                       <GripVertical size={14} />
                     </span>
                   </div>
+
+                  {/* Top-Left: Quick scan (large view) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setScanIdx(idx);
+                    }}
+                    className="absolute top-1.5 left-1.5 p-2 rounded-md bg-black/60 text-neutral-300 hover:text-white backdrop-blur-md transition cursor-pointer z-10"
+                    title="Quick scan — large view"
+                  >
+                    <Maximize2 size={12} />
+                  </button>
 
                   {/* Top-Right Controls: Star Cover & Delete */}
                   <div className="absolute top-1.5 right-1.5 flex gap-1 z-10">
@@ -785,6 +860,111 @@ export default function EditAlbumView() {
         </div>
 
         <AdminAlbumInsights albumId={albumId} category={category} photos={photos} />
+
+        {/* Quick scan overlay: large one-at-a-time preview for cover/prune decisions */}
+        {scanPhoto && (
+          <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col" role="dialog" aria-modal="true">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 shrink-0">
+              <div className="min-w-0 flex items-center gap-2">
+                <p className="text-xs text-neutral-300 truncate">{scanPhoto.original_filename}</p>
+                {coverUrl === scanPhoto.urls.thumb && (
+                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider bg-amber-500 text-black px-1.5 py-0.5 rounded">
+                    Cover
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="text-xs text-neutral-400 font-mono">
+                  {scanPos + 1} / {photos.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setScanIdx(null)}
+                  className="p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition cursor-pointer"
+                  title="Close quick scan (Esc)"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div className="relative flex-1 min-h-0 flex items-center justify-center px-14 pb-2">
+              <button
+                type="button"
+                disabled={scanPos === 0}
+                onClick={() => scanStep(-1)}
+                className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2.5 rounded-full bg-neutral-800/90 hover:bg-neutral-700 disabled:opacity-30 text-white transition cursor-pointer"
+                title="Previous (←)"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              {scanPhoto.type === "video" ? (
+                <video
+                  key={scanPhoto.id}
+                  src={scanPhoto.urls.original}
+                  poster={scanPhoto.urls.thumb}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="max-h-full max-w-full rounded-lg shadow-2xl bg-black"
+                />
+              ) : (
+                <img
+                  key={scanPhoto.id}
+                  src={scanPhoto.urls.display}
+                  alt={scanPhoto.original_filename}
+                  className="max-h-full max-w-full object-contain rounded-lg shadow-2xl"
+                />
+              )}
+              <button
+                type="button"
+                disabled={scanPos === photos.length - 1}
+                onClick={() => scanStep(1)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2.5 rounded-full bg-neutral-800/90 hover:bg-neutral-700 disabled:opacity-30 text-white transition cursor-pointer"
+                title="Next (→)"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+
+            <div className="shrink-0 px-4 pb-5 pt-1 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCoverUrl(scanPhoto.urls.thumb)}
+                  disabled={coverUrl === scanPhoto.urls.thumb}
+                  className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    coverUrl === scanPhoto.urls.thumb
+                      ? "bg-amber-500 text-black"
+                      : "bg-neutral-800 hover:bg-neutral-700 text-neutral-200"
+                  }`}
+                  title="Set this photo as the album cover"
+                >
+                  <Star size={14} fill={coverUrl === scanPhoto.urls.thumb ? "currentColor" : "none"} />
+                  {coverUrl === scanPhoto.urls.thumb ? "Album cover" : "Set as cover"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMarkFromScan(scanPhoto)}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-neutral-800 hover:bg-red-950 hover:text-red-300 text-neutral-200 text-xs font-semibold transition cursor-pointer"
+                  title="Mark for deletion (applied when you Save Changes)"
+                >
+                  <Trash2 size={14} /> Mark for deletion
+                </button>
+              </div>
+              <p className="text-[11px] text-neutral-500">
+                ← → to browse • Del marks for deletion • Esc to close — deletions apply when you Save Changes
+              </p>
+            </div>
+
+            {/* Preload neighbours so stepping feels instant */}
+            {[scanPos - 1, scanPos + 1]
+              .filter((i) => i >= 0 && i < photos.length && photos[i].type !== "video")
+              .map((i) => (
+                <img key={photos[i].id} src={photos[i].urls.display} alt="" className="hidden" />
+              ))}
+          </div>
+        )}
       </main>
     </div>
   );

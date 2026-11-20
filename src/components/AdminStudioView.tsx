@@ -1216,9 +1216,18 @@ export default function AdminStudioView() {
                   {albums.map((album) => (
                     <div
                       key={album.id}
-                      className="flex items-center justify-between p-3.5 bg-neutral-900 border border-neutral-800 rounded-xl"
+                      className="flex items-center gap-3 p-3.5 bg-neutral-900 border border-neutral-800 rounded-xl"
                     >
-                      <div className="flex items-center gap-3 overflow-hidden">
+                      {/* Delete lives at the far end of the card from Edit, so the two are never neighbours */}
+                      <button
+                        type="button"
+                        onClick={() => setAlbumToDelete(album)}
+                        className="p-2.5 shrink-0 text-red-400/60 hover:text-red-400 rounded-lg bg-neutral-800/60 hover:bg-red-950/60 transition cursor-pointer"
+                        title="Delete Album"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <div className="flex items-center gap-3 overflow-hidden flex-1">
                         <div className="w-12 h-12 rounded-lg overflow-hidden bg-neutral-950 shrink-0">
                           {album.cover_url ? (
                             <img src={album.cover_url} alt="" className="w-full h-full object-cover" />
@@ -1233,23 +1242,13 @@ export default function AdminStudioView() {
                           <p className="text-[11px] text-neutral-400">{album.category || "Uncategorized"} • {album.photo_count} items</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <Link
-                          href={`/admin/edit/${album.id}`}
-                          className="p-2.5 text-neutral-400 hover:text-white rounded-lg bg-neutral-800 hover:bg-neutral-700 transition"
-                          title="Edit Album"
-                        >
-                          <Edit size={14} />
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => setAlbumToDelete(album)}
-                          className="p-2.5 text-neutral-400 hover:text-red-400 rounded-lg bg-neutral-800 hover:bg-neutral-700 transition cursor-pointer"
-                          title="Delete Album"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      <Link
+                        href={`/admin/edit/${album.id}`}
+                        className="p-2.5 shrink-0 text-neutral-400 hover:text-white rounded-lg bg-neutral-800 hover:bg-neutral-700 transition"
+                        title="Edit Album"
+                      >
+                        <Edit size={14} />
+                      </Link>
                     </div>
                   ))}
                 </div>
@@ -1811,7 +1810,7 @@ export default function AdminStudioView() {
                 <p className="text-xs text-neutral-400 leading-relaxed">
                   Are you sure you want to permanently delete{" "}
                   <span className="text-white font-semibold">&quot;{albumToDelete.title}&quot;</span>?
-                  This removes the album from the public directory.
+                  This removes the album and its {albumToDelete.photo_count ?? 0} photos from the public site.
                 </p>
               </div>
             </div>

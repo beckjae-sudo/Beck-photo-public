@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.667,
- "updatedLabel": "Updated Fri Nov 20, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.7,
+ "updatedLabel": "Updated Sat Nov 21, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -12,10 +12,16 @@
    "name": "Groceries",
    "icon": "🛒",
    "cap": 2300,
-   "spent": 1654.65,
+   "spent": 1705.15,
    "pendingSpent": 0,
    "note": "Aldi-first; Food Lion list-only fill-ins",
    "charges": [
+    {
+     "d": "2026-11-19",
+     "n": "Food Lion",
+     "a": 50.5,
+     "p": 0
+    },
     {
      "d": "2026-11-18",
      "n": "Dollar Tree",
@@ -172,15 +178,21 @@
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 290.9,
-   "pendingSpent": 2.94,
+   "spent": 329.75,
+   "pendingSpent": 38.85,
    "note": "One planned family night a week + emergencies (incl. coffee)",
    "charges": [
     {
-     "d": "2026-11-18",
+     "d": "2026-11-20",
+     "n": "Chick-fil-A",
+     "a": 38.85,
+     "p": 1
+    },
+    {
+     "d": "2026-11-20",
      "n": "Chick-fil-A",
      "a": 2.94,
-     "p": 1
+     "p": 0
     },
     {
      "d": "2026-11-16",
@@ -308,10 +320,16 @@
    "name": "Restaurants",
    "icon": "🍽️",
    "cap": 200,
-   "spent": 111.37,
+   "spent": 131.89,
    "pendingSpent": 0,
    "note": "Real sit-down meals — protected from fast-food creep",
    "charges": [
+    {
+     "d": "2026-11-20",
+     "n": "Town Hall",
+     "a": 20.52,
+     "p": 0
+    },
     {
      "d": "2026-11-16",
      "n": "Family Pizzeria",
@@ -413,14 +431,14 @@
    "icon": "🎧",
    "cap": 200,
    "spent": 39.4,
-   "pendingSpent": -36.65,
+   "pendingSpent": 0,
    "note": "Combined envelope — $100 each",
    "charges": [
     {
-     "d": "2026-11-19",
+     "d": "2026-11-20",
      "n": "Amazon",
      "a": -36.65,
-     "p": 1
+     "p": 0
     },
     {
      "d": "2026-11-17",
@@ -494,9 +512,21 @@
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
-   "val": "$159",
+   "val": "$163",
    "note": "This month, from the bank feed",
    "charges": [
+    {
+     "d": "2026-11-20",
+     "n": "Theverge",
+     "a": 2,
+     "p": 1
+    },
+    {
+     "d": "2026-11-20",
+     "n": "Google One",
+     "a": 1.99,
+     "p": 1
+    },
     {
      "d": "2026-11-18",
      "n": "Roku",

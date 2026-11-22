@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.7,
- "updatedLabel": "Updated Sat Nov 21, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.733,
+ "updatedLabel": "Updated Sun Nov 22, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -512,9 +512,15 @@
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
-   "val": "$163",
+   "val": "$168",
    "note": "This month, from the bank feed",
    "charges": [
+    {
+     "d": "2026-11-21",
+     "n": "Audible",
+     "a": 5.94,
+     "p": 1
+    },
     {
      "d": "2026-11-20",
      "n": "Theverge",

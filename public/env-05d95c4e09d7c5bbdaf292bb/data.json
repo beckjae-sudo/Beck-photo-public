@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.767,
- "updatedLabel": "Updated Mon Nov 23, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.8,
+ "updatedLabel": "Updated Tue Nov 24, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -12,14 +12,20 @@
    "name": "Groceries",
    "icon": "🛒",
    "cap": 2300,
-   "spent": 2039.22,
-   "pendingSpent": 334.07,
+   "spent": 2055.2,
+   "pendingSpent": 15.98,
    "note": "Aldi-first; Food Lion list-only fill-ins",
    "charges": [
     {
-     "d": "2026-11-22",
+     "d": "2026-11-23",
      "n": "Food Lion",
      "a": 334.07,
+     "p": 0
+    },
+    {
+     "d": "2026-11-23",
+     "n": "Food Lion",
+     "a": 15.98,
      "p": 1
     },
     {
@@ -184,15 +190,21 @@
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 329.75,
-   "pendingSpent": 38.85,
+   "spent": 338.75,
+   "pendingSpent": 0,
    "note": "One planned family night a week + emergencies (incl. coffee)",
    "charges": [
     {
-     "d": "2026-11-20",
+     "d": "2026-11-23",
      "n": "Chick-fil-A",
      "a": 38.85,
-     "p": 1
+     "p": 0
+    },
+    {
+     "d": "2026-11-23",
+     "n": "Corvian Athlet",
+     "a": 9,
+     "p": 0
     },
     {
      "d": "2026-11-20",
@@ -326,10 +338,16 @@
    "name": "Restaurants",
    "icon": "🍽️",
    "cap": 200,
-   "spent": 131.89,
-   "pendingSpent": 0,
+   "spent": 156.47,
+   "pendingSpent": 24.58,
    "note": "Real sit-down meals — protected from fast-food creep",
    "charges": [
+    {
+     "d": "2026-11-23",
+     "n": "P.F. Chang's",
+     "a": 24.58,
+     "p": 1
+    },
     {
      "d": "2026-11-20",
      "n": "Town Hall",
@@ -436,10 +454,16 @@
    "name": "Blow Money — Jae & Jennifer",
    "icon": "🎧",
    "cap": 200,
-   "spent": 39.4,
+   "spent": 94.4,
    "pendingSpent": 0,
    "note": "Combined envelope — $100 each",
    "charges": [
+    {
+     "d": "2026-11-23",
+     "n": "Best Buy",
+     "a": 55,
+     "p": 0
+    },
     {
      "d": "2026-11-20",
      "n": "Amazon",
@@ -518,44 +542,26 @@
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
-   "val": "$206",
+   "val": "$197",
    "note": "This month, from the bank feed",
    "charges": [
     {
-     "d": "2026-11-22",
-     "n": "Apple",
+     "d": "2026-11-23",
+     "n": "Apple via PayPal",
      "a": 16.23,
-     "p": 1
+     "p": 0
     },
     {
-     "d": "2026-11-22",
+     "d": "2026-11-23",
      "n": "Audible",
      "a": 16.18,
-     "p": 1
+     "p": 0
     },
     {
-     "d": "2026-11-22",
-     "n": "CP EB IT ******7733",
-     "a": 4.99,
-     "p": 1
-    },
-    {
-     "d": "2026-11-21",
+     "d": "2026-11-23",
      "n": "Audible",
      "a": 5.94,
-     "p": 1
-    },
-    {
-     "d": "2026-11-20",
-     "n": "Theverge",
-     "a": 2,
-     "p": 1
-    },
-    {
-     "d": "2026-11-20",
-     "n": "Google One",
-     "a": 1.99,
-     "p": 1
+     "p": 0
     },
     {
      "d": "2026-11-18",

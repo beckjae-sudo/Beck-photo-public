@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.8,
- "updatedLabel": "Updated Tue Nov 24, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.833,
+ "updatedLabel": "Updated Wed Nov 25, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -13,20 +13,20 @@
    "icon": "🛒",
    "cap": 2300,
    "spent": 2055.2,
-   "pendingSpent": 15.98,
+   "pendingSpent": 0,
    "note": "Aldi-first; Food Lion list-only fill-ins",
    "charges": [
     {
-     "d": "2026-11-23",
+     "d": "2026-11-24",
      "n": "Food Lion",
-     "a": 334.07,
+     "a": 15.98,
      "p": 0
     },
     {
      "d": "2026-11-23",
      "n": "Food Lion",
-     "a": 15.98,
-     "p": 1
+     "a": 334.07,
+     "p": 0
     },
     {
      "d": "2026-11-19",
@@ -190,10 +190,16 @@
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 338.75,
-   "pendingSpent": 0,
+   "spent": 359.07,
+   "pendingSpent": 20.32,
    "note": "One planned family night a week + emergencies (incl. coffee)",
    "charges": [
+    {
+     "d": "2026-11-24",
+     "n": "Chick-fil-A",
+     "a": 20.32,
+     "p": 1
+    },
     {
      "d": "2026-11-23",
      "n": "Chick-fil-A",
@@ -542,9 +548,27 @@
  "trackers": [
   {
    "name": "Entertainment (no cap set)",
-   "val": "$197",
+   "val": "$270",
    "note": "This month, from the bank feed",
    "charges": [
+    {
+     "d": "2026-11-25",
+     "n": "Netflix",
+     "a": 9.73,
+     "p": 1
+    },
+    {
+     "d": "2026-11-24",
+     "n": "YouTube",
+     "a": 54.11,
+     "p": 1
+    },
+    {
+     "d": "2026-11-24",
+     "n": "AMC Theatres",
+     "a": 8.95,
+     "p": 1
+    },
     {
      "d": "2026-11-23",
      "n": "Apple via PayPal",
@@ -621,9 +645,15 @@
   },
   {
    "name": "Gas & Fuel",
-   "val": "$282",
+   "val": "$335",
    "note": "This month, from the bank feed",
    "charges": [
+    {
+     "d": "2026-11-24",
+     "n": "Circle K",
+     "a": 52.64,
+     "p": 1
+    },
     {
      "d": "2026-11-16",
      "n": "BP",

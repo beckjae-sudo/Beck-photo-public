@@ -1,7 +1,7 @@
 {
  "monthLabel": "November 2026 — live from your SECU checking feed",
- "monthFraction": 0.867,
- "updatedLabel": "Updated Thu Nov 26, 12:23 PM · posted + pending from SECU checking",
+ "monthFraction": 0.9,
+ "updatedLabel": "Updated Fri Nov 27, 12:23 PM · posted + pending from SECU checking",
  "sweep": {
   "medical": 250,
   "sinking": 250,
@@ -208,10 +208,16 @@
    "name": "Fast Food",
    "icon": "🍔",
    "cap": 600,
-   "spent": 359.07,
-   "pendingSpent": 20.32,
+   "spent": 380.8,
+   "pendingSpent": 42.05,
    "note": "One planned family night a week + emergencies (incl. coffee)",
    "charges": [
+    {
+     "d": "2026-11-26",
+     "n": "McDonald's",
+     "a": 21.73,
+     "p": 1
+    },
     {
      "d": "2026-11-24",
      "n": "Chick-fil-A",
@@ -362,10 +368,16 @@
    "name": "Restaurants",
    "icon": "🍽️",
    "cap": 200,
-   "spent": 166.47,
-   "pendingSpent": 0,
+   "spent": 306.36,
+   "pendingSpent": 139.89,
    "note": "Real sit-down meals — protected from fast-food creep",
    "charges": [
+    {
+     "d": "2026-11-26",
+     "n": "Cracker Barrel",
+     "a": 139.89,
+     "p": 1
+    },
     {
      "d": "2026-11-25",
      "n": "P.F. Chang's",
